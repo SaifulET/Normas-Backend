@@ -1,0 +1,26 @@
+{
+  "name": "normanbackend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Node.js Express auth server with Mongoose and OTP password reset",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "echo \"No tests configured\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.924.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
+    "mongoose": "^9.6.1",
+    "nodemailer": "^8.0.7"
+  }
+}
