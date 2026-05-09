@@ -1,5 +1,41 @@
 import mongoose from "mongoose";
 
+const socialLinksSchema = new mongoose.Schema(
+  {
+    whatsapp: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    facebook: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    instagram: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    youtube: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    x: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    tiktok: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -18,6 +54,36 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
+    },
+    mobile: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    profileImage: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    taxPercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    stripeCustomerId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    stripeDefaultPaymentMethodId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    socialLinks: {
+      type: socialLinksSchema,
+      default: () => ({}),
     },
     password: {
       type: String,

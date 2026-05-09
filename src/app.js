@@ -5,10 +5,21 @@ import kycRoutes from "./modules/kyc/routes/kyc.routes.js";
 import listRoutes from "./modules/list/routes/list.routes.js";
 import legalContentRoutes from "./modules/legal-content/routes/legalContent.routes.js";
 import faqRoutes from "./modules/faq/routes/faq.routes.js";
+import pricingRoutes from "./modules/pricing/routes/pricing.routes.js";
+import * as pricingController from "./modules/pricing/controllers/pricing.controller.js";
+import reportRoutes from "./modules/report/routes/report.routes.js";
+import supportRoutes from "./modules/support/routes/support.routes.js";
+import investmentConversationRoutes from "./modules/investment-conversations/routes/investmentConversation.routes.js";
+import { optionalAuthenticate } from "./middlewares/optionalAuth.middleware.js";
 
 const app = express();
 
 app.use(cors());
+app.post(
+  "/api/v1/pricing/webhook",
+  express.raw({ type: "application/json" }),
+  pricingController.handleStripeWebhook
+);
 app.use(express.json());
 
 app.get("/", (_req, res) => {
@@ -23,6 +34,10 @@ app.use("/api/v1/kyc", kycRoutes);
 app.use("/api/v1/lists", listRoutes);
 app.use("/api/v1/legal-contents", legalContentRoutes);
 app.use("/api/v1/faqs", faqRoutes);
+app.use("/api/v1/pricing", pricingRoutes);
+app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/support", optionalAuthenticate, supportRoutes);
+app.use("/api/v1/investment-conversations", investmentConversationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
