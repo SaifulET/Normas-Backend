@@ -14,6 +14,8 @@ router.post("/forgot-password", authController.forgotPassword);
 router.post("/resend-password-otp", authController.resendPasswordOtp);
 router.post("/verify-password-otp", authController.verifyPasswordOtp);
 router.post("/set-new-password", authController.setNewPassword);
+router.get("/profile", authenticate, profileController.getMyProfile);
+router.patch("/profile", authenticate, profileController.updateMyProfile);
 router.get(
   "/superadmin/profile",
   authenticate,

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
+import Kyc from "../../kyc/models/kyc.model.js";
 import User from "../models/user.model.js";
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -44,12 +45,12 @@ const normalizeSocialLinks = (value) => {
   };
 };
 
-const buildProfileResponse = (user) => ({
+const buildProfileResponse = (user, profileImage = user.profileImage) => ({
   id: user._id,
   name: user.name,
   email: user.email,
   mobile: user.mobile,
-  profileImage: user.profileImage,
+  profileImage,
   taxPercentage: user.taxPercentage,
   socialLinks: user.socialLinks || {},
   role: user.role,
@@ -77,6 +78,14 @@ const getUserOrThrow = async (userId, withPassword = false) => {
   return user;
 };
 
+const getProfileImageFromKyc = async (userId) => {
+  const kyc = await Kyc.findOne({ user: userId })
+    .select("faceVerification.facePhoto")
+    .lean();
+
+  return normalizeText(kyc?.faceVerification?.facePhoto);
+};
+
 const assertSuperadmin = (authUser) => {
   if (!authUser?.userId) {
     throw new AppError("Unauthorized", 401);
@@ -87,9 +96,51 @@ const assertSuperadmin = (authUser) => {
   }
 };
 
+const assertAuthenticatedUser = (authUser) => {
+  if (!authUser?.userId) {
+    throw new AppError("Unauthorized", 401);
+  }
+};
+
 export const getSuperadminProfile = async (authUser) => {
   assertSuperadmin(authUser);
   const user = await getUserOrThrow(authUser.userId);
+  return buildProfileResponse(user);
+};
+
+export const getMyProfile = async (authUser) => {
+  assertAuthenticatedUser(authUser);
+  const user = await getUserOrThrow(authUser.userId);
+  const profileImage =
+    normalizeText(user.profileImage) || (await getProfileImageFromKyc(authUser.userId));
+  return buildProfileResponse(user, profileImage);
+};
+
+export const updateMyProfile = async (authUser, payload = {}) => {
+  assertAuthenticatedUser(authUser);
+
+  if (typeof payload.email !== "undefined" || typeof payload.role !== "undefined") {
+    throw new AppError("email and role cannot be changed from this API", 400);
+  }
+
+  const user = await getUserOrThrow(authUser.userId);
+
+  if (typeof payload.name !== "undefined") {
+    const name = normalizeText(payload.name);
+
+    if (!name) {
+      throw new AppError("name is required", 400);
+    }
+
+    user.name = name;
+  }
+
+  if (typeof payload.mobile !== "undefined" || typeof payload.phone !== "undefined") {
+    user.mobile = normalizeText(payload.mobile ?? payload.phone);
+  }
+
+  await user.save();
+
   return buildProfileResponse(user);
 };
 

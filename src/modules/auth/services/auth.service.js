@@ -32,25 +32,34 @@ const validateSigninPayload = ({ email, password }) => {
 
 const generateAccessToken = (user) =>
   jwt.sign(
-    { userId: user._id, email: user.email, role: user.role },
+    { userId: user._id },
     process.env.ACCESS_TOKEN_SECRET,
     { expiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || "15m" }
   );
 
 const generateRefreshToken = (user) =>
   jwt.sign(
-    { userId: user._id, email: user.email, role: user.role },
+    { userId: user._id },
     process.env.REFRESH_TOKEN_SECRET,
     { expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || "7d" }
   );
 
+const serializeAuthUser = (user) => ({
+  id: user._id.toString(),
+  _id: user._id.toString(),
+  name: user.name,
+  role: user.role,
+  email: user.email,
+  mobile: user.mobile || "",
+  profileImage: user.profileImage || "",
+  taxPercentage: user.taxPercentage ?? 0,
+  socialLinks: user.socialLinks || {},
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+});
+
 const buildAuthResponse = (user, accessToken, refreshToken) => ({
-  user: {
-    id: user._id,
-    name: user.name,
-    role: user.role,
-    email: user.email,
-  },
+  user: serializeAuthUser(user),
   accessToken,
   refreshToken,
 });

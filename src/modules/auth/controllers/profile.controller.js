@@ -14,6 +14,34 @@ export const getSuperadminProfile = async (req, res, next) => {
   }
 };
 
+export const getMyProfile = async (req, res, next) => {
+  try {
+    const result = await profileService.getMyProfile(req.user);
+
+    res.status(200).json({
+      success: true,
+      message: "Profile fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateMyProfile = async (req, res, next) => {
+  try {
+    const result = await profileService.updateMyProfile(req.user, req.body);
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateSuperadminProfile = async (req, res, next) => {
   try {
     const result = await profileService.updateSuperadminProfile(req.user, req.body);

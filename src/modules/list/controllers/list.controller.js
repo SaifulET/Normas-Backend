@@ -42,6 +42,34 @@ export const getAllLists = async (_req, res, next) => {
   }
 };
 
+export const getFilteredLists = async (req, res, next) => {
+  try {
+    const result = await listService.getFilteredLists(req.query);
+
+    res.status(200).json({
+      success: true,
+      message: "Filtered lists fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getSectorListCounts = async (req, res, next) => {
+  try {
+    const result = await listService.getSectorListCounts(req.query);
+
+    res.status(200).json({
+      success: true,
+      message: "Sector list counts fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getMyLists = async (req, res, next) => {
   try {
     const result = await listService.getMyLists(req.user);
@@ -86,6 +114,7 @@ export const updateListViewCount = async (req, res, next) => {
 
 export const changeListStatus = async (req, res, next) => {
   try {
+   
     const result = await listService.changeListStatus(req.user, req.params.listId, req.body.status);
 
     res.status(200).json({

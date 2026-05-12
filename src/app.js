@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import "dotenv/config";
 import authRoutes from "./modules/auth/routes/auth.routes.js";
 import kycRoutes from "./modules/kyc/routes/kyc.routes.js";
 import listRoutes from "./modules/list/routes/list.routes.js";
@@ -14,13 +15,33 @@ import { optionalAuthenticate } from "./middlewares/optionalAuth.middleware.js";
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 app.post(
   "/api/v1/pricing/webhook",
   express.raw({ type: "application/json" }),
   pricingController.handleStripeWebhook
 );
-app.use(express.json());
+app.use(express.json({ limit: "20mb" }));
 
 app.get("/", (_req, res) => {
   res.status(200).json({

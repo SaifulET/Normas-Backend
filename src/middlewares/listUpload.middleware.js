@@ -3,11 +3,13 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import AppError from "../utils/appError.js";
 
 const maxFileSize = 5 * 1024 * 1024;
+const maxFieldSize = 20 * 1024 * 1024;
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: maxFileSize,
+    fieldSize: maxFieldSize,
     files: 1,
   },
   fileFilter: (_req, file, cb) => {

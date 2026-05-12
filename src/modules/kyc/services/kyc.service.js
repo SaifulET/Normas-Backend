@@ -16,8 +16,8 @@ const validateCreatePayload = (payload) => {
   }
 };
 
-const validateImageUrlsOnUpdate = (payload) => {
-  const imageFields = [
+const validateFileUrlsOnUpdate = (payload) => {
+  const fileFields = [
     ["personalIdentity", "identityDocument"],
     ["addressVerification", "utilityBill"],
     ["addressVerification", "bankStatement"],
@@ -28,12 +28,12 @@ const validateImageUrlsOnUpdate = (payload) => {
     ["sourceOfFunds", "taxReturns"],
   ];
 
-  for (const [section, field] of imageFields) {
+  for (const [section, field] of fileFields) {
     if (
       Object.prototype.hasOwnProperty.call(payload?.[section] || {}, field) &&
       typeof payload[section][field] !== "string"
     ) {
-      throw new AppError(`${section}.${field} must be an image URL`, 400);
+      throw new AppError(`${section}.${field} must be a file URL`, 400);
     }
   }
 };
@@ -51,6 +51,19 @@ const getUserOrThrow = async (userId) => {
 
   return user;
 };
+
+const buildUserDetailsResponse = (user) => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  mobile: user.mobile,
+  profileImage: user.profileImage,
+  taxPercentage: user.taxPercentage,
+  socialLinks: user.socialLinks || {},
+  role: user.role,
+  createdAt: user.createdAt,
+  updatedAt: user.updatedAt,
+});
 
 export const createKyc = async (authUser, payload) => {
   validateCreatePayload(payload);
@@ -122,12 +135,25 @@ export const getMyKyc = async (authUser) => {
   return kyc;
 };
 
+export const getMyDetailsWithKyc = async (authUser) => {
+  const user = await getUserOrThrow(authUser.userId);
+
+  const kyc = await Kyc.find({ user: authUser.userId })
+    .populate("approval.reviewedBy", "name email role")
+    .sort({ createdAt: -1 });
+
+  return {
+    user: buildUserDetailsResponse(user),
+    kyc,
+  };
+};
+
 export const updateKyc = async (authUser, kycId, payload) => {
   if (!isValidObjectId(kycId)) {
     throw new AppError("Invalid kycId", 400);
   }
 
-  validateImageUrlsOnUpdate(payload);
+  validateFileUrlsOnUpdate(payload);
 
   const kyc = await Kyc.findById(kycId);
 

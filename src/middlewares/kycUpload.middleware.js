@@ -2,17 +2,21 @@ import multer from "multer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import AppError from "../utils/appError.js";
 
-const maxFileSize = 5 * 1024 * 1024;
+const bytesPerMb = 1024 * 1024;
+const maxFileSize = Number(process.env.KYC_MAX_FILE_SIZE_MB || 50) * bytesPerMb;
+
+const isAllowedKycFile = (mimetype = "") =>
+  mimetype.startsWith("image/") || mimetype.startsWith("video/") || mimetype === "application/pdf";
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: maxFileSize,
-    files: 6,
+    files: 8,
   },
   fileFilter: (_req, file, cb) => {
-    if (!file.mimetype?.startsWith("image/")) {
-      cb(new AppError("Only image files are allowed", 400));
+    if (!isAllowedKycFile(file.mimetype)) {
+      cb(new AppError("Only image, video, or PDF files are allowed", 400));
       return;
     }
 
@@ -41,6 +45,9 @@ const uploadFieldToBodyPath = {
   businessDocument: ["sourceOfFunds", "businessDocument"],
   taxReturns: ["sourceOfFunds", "taxReturns"],
 };
+
+let cachedS3Client = null;
+let cachedS3Config = null;
 
 const setNestedValue = (target, path, value) => {
   let current = target;
@@ -94,28 +101,52 @@ const getAwsConfig = () => {
   };
 };
 
-const uploadBufferToS3 = async (file, userId) => {
+const getS3Client = () => {
   const awsConfig = getAwsConfig();
-  const s3Client = new S3Client({
+
+  if (
+    !cachedS3Client ||
+    cachedS3Config?.region !== awsConfig.region ||
+    cachedS3Config?.accessKeyId !== awsConfig.credentials.accessKeyId ||
+    cachedS3Config?.secretAccessKey !== awsConfig.credentials.secretAccessKey
+  ) {
+    cachedS3Client = new S3Client({
+      region: awsConfig.region,
+      credentials: awsConfig.credentials,
+    });
+    cachedS3Config = {
+      region: awsConfig.region,
+      accessKeyId: awsConfig.credentials.accessKeyId,
+      secretAccessKey: awsConfig.credentials.secretAccessKey,
+      bucketName: awsConfig.bucketName,
+    };
+  }
+
+  return {
+    s3Client: cachedS3Client,
+    bucketName: awsConfig.bucketName,
     region: awsConfig.region,
-    credentials: awsConfig.credentials,
-  });
+  };
+};
+
+const uploadBufferToS3 = async (file, userId) => {
+  const { s3Client, bucketName, region } = getS3Client();
 
   const key = buildFileKey(userId, file.fieldname, file.originalname);
 
   await s3Client.send(
     new PutObjectCommand({
-      Bucket: awsConfig.bucketName,
+      Bucket: bucketName,
       Key: key,
       Body: file.buffer,
       ContentType: file.mimetype,
     })
   );
 
-  return `https://${awsConfig.bucketName}.s3.${awsConfig.region}.amazonaws.com/${key}`;
+  return `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
 };
 
-export const handleKycImageUpload = [
+export const handleKycFileUpload = [
   upload.fields(uploadFields),
   async (req, _res, next) => {
     try {
@@ -123,17 +154,24 @@ export const handleKycImageUpload = [
 
       const uploadedFiles = req.files || {};
       const fileEntries = Object.entries(uploadedFiles);
-      console.log("Uploaded files:", fileEntries);
 
-      for (const [fieldName, files] of fileEntries) {
-        const file = files?.[0];
+      const uploadResults = await Promise.all(
+        fileEntries.map(async ([fieldName, files]) => {
+          const file = files?.[0];
 
-        if (!file) {
-          continue;
+          if (!file) {
+            return null;
+          }
+
+          const url = await uploadBufferToS3(file, req.user.userId);
+          return { fieldName, url };
+        })
+      );
+
+      for (const result of uploadResults) {
+        if (result) {
+          setNestedValue(req.body, uploadFieldToBodyPath[result.fieldName], result.url);
         }
-
-        const url = await uploadBufferToS3(file, req.user.userId);
-        setNestedValue(req.body, uploadFieldToBodyPath[fieldName], url);
       }
 
       next();
@@ -143,3 +181,5 @@ export const handleKycImageUpload = [
     }
   },
 ];
+
+export const handleKycImageUpload = handleKycFileUpload;

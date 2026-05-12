@@ -56,6 +56,20 @@ export const getMyKyc = async (req, res, next) => {
   }
 };
 
+export const getMyDetailsWithKyc = async (req, res, next) => {
+  try {
+    const result = await kycService.getMyDetailsWithKyc(req.user);
+
+    res.status(200).json({
+      success: true,
+      message: "User details with KYC fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateKyc = async (req, res, next) => {
   try {
     const result = await kycService.updateKyc(req.user, req.params.kycId, req.body);

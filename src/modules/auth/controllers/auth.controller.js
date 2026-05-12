@@ -6,7 +6,7 @@ const signup = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: "User registered successfully",
+      message: "User registered and logged in successfully",
       data: result,
     });
   } catch (error) {
