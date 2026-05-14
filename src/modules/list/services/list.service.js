@@ -130,8 +130,15 @@ const parseBase64ImageDataUrl = (src) => {
   };
 };
 
+const stripDescriptionClipboardArtifacts = (description) => {
+  return String(description || "")
+    .replace(/<span\b[^>]*(?:data-metadata|data-buffer)\s*=\s*(["'])[\s\S]*?\1[^>]*>\s*<\/span>/gi, "")
+    .replace(/<!--\s*\(fig(?:ma|meta)\)[\s\S]*?\/fig(?:ma|meta)\s*-->/gi, "")
+    .replace(/&lt;!--\s*\(fig(?:ma|meta)\)[\s\S]*?\/fig(?:ma|meta)\s*--&gt;/gi, "");
+};
+
 const replaceDescriptionImageSources = async (description, userId) => {
-  const normalizedDescription = String(description || "");
+  const normalizedDescription = stripDescriptionClipboardArtifacts(description);
   const srcPattern = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(data:image\/[^"']+)\2/gi;
   const uploads = new Map();
   let totalImageSize = 0;
