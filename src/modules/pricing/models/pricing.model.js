@@ -11,13 +11,14 @@ export const pricingAudienceRoles = ["investor", "investee"];
 export const pricingPlanTiers = ["basic", "pro"];
 export const billingCycles = ["monthly", "annual"];
 
-const pricingPlanSchema = new mongoose.Schema(
+const pricingSchema = new mongoose.Schema(
   {
     planType: {
       type: String,
-      enum: pricingPlanTypes,
       required: true,
       trim: true,
+      unique: true,
+      index: true,
     },
     audienceRole: {
       type: String,
@@ -98,24 +99,6 @@ const pricingPlanSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
-    },
-  },
-  {
-    _id: false,
-  }
-);
-
-const pricingSchema = new mongoose.Schema(
-  {
-    plans: {
-      type: [pricingPlanSchema],
-      required: true,
-      validate: {
-        validator(plans) {
-          return Array.isArray(plans) && plans.length === pricingPlanTypes.length;
-        },
-        message: "plans must contain all supported pricing plans",
-      },
     },
     lastModifiedBy: {
       type: mongoose.Schema.Types.ObjectId,

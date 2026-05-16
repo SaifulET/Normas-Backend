@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.get("/", pricingController.getPricing);
 router.get("/plans", pricingController.getPublicPlans);
+router.get("/plans/:planType", pricingController.getPublicPlanByType);
 
 router.use(authenticate);
 

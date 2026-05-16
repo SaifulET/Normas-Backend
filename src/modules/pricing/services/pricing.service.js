@@ -95,6 +95,8 @@ const normalizeOptionalText = (value) => {
   return normalizeText(value);
 };
 
+const normalizeBoolean = (value) => value === true || value === "true";
+
 const toAmountInCents = (amount) => {
   const number = Number(amount);
 
@@ -149,26 +151,30 @@ const paginateArray = (items, { page, limit }) => {
   };
 };
 
-const buildDefaultPlans = () =>
-  pricingPlanTypes.map((planType) => ({
+const getDefaultPlan = (planType) => {
+  const defaultPlan = defaultPlanMap[planType] || {};
+  const title = defaultPlan.title || planType;
+
+  return {
     planType,
-    audienceRole: defaultPlanMap[planType].audienceRole,
-    tier: defaultPlanMap[planType].tier,
-    title: defaultPlanMap[planType].title,
-    description: defaultPlanMap[planType].description,
+    audienceRole: defaultPlan.audienceRole || inferAudienceRoleFromPlanType(planType),
+    tier: defaultPlan.tier || inferTierFromPlanType(planType),
+    title,
+    description: defaultPlan.description || "",
     currency: DEFAULT_CURRENCY,
     pricePerMonth: 0,
     discountMonthly: 0,
     discountAnnually: 0,
     monthlyPrice: 0,
     annualPrice: 0,
-    features: defaultPlanMap[planType].features,
-    subscriptionTopics: defaultPlanMap[planType].subscriptionTopics,
+    features: defaultPlan.features || [],
+    subscriptionTopics: defaultPlan.subscriptionTopics || [title],
     isActive: true,
     stripeProductId: "",
     stripeMonthlyPriceId: "",
     stripeAnnualPriceId: "",
-  }));
+  };
+};
 
 const validateObjectId = (value, fieldName) => {
   if (!isValidObjectId(value)) {
@@ -202,11 +208,17 @@ const getPricingByIdOrThrow = async (pricingId) => {
   return pricing;
 };
 
-const getPricingOrThrow = async () => {
-  const pricing = await Pricing.findOne().populate("lastModifiedBy", "name email role");
+const getPricingPlanByTypeOrThrow = async (planType) => {
+  const normalizedPlanType = normalizeText(planType);
+
+  if (!normalizedPlanType) {
+    throw new AppError("planType is required", 400);
+  }
+
+  const pricing = await Pricing.findOne({ planType: normalizedPlanType }).populate("lastModifiedBy", "name email role");
 
   if (!pricing) {
-    throw new AppError("Pricing is not configured yet", 404);
+    throw new AppError("Pricing plan not found", 404);
   }
 
   return pricing;
@@ -293,98 +305,92 @@ const calculateDiscountedPrices = ({
   };
 };
 
-const sanitizePlans = (plans) => {
-  if (!Array.isArray(plans) || plans.length !== pricingPlanTypes.length) {
-    throw new AppError(
-      `plans must be an array with exactly ${pricingPlanTypes.length} items`,
-      400
-    );
+const sanitizePlan = (plan, fieldPath = "plan") => {
+  if (!plan || typeof plan !== "object") {
+    throw new AppError(`${fieldPath} must be an object`, 400);
   }
 
-  const normalizedPlans = plans.map((plan, index) => {
-    if (!plan || typeof plan !== "object") {
-      throw new AppError(`plans[${index}] must be an object`, 400);
-    }
+  const planType = normalizeText(plan.planType);
 
-    if (!pricingPlanTypes.includes(plan.planType)) {
-      throw new AppError(
-        `plans[${index}].planType must be one of: ${pricingPlanTypes.join(", ")}`,
-        400
-      );
-    }
+  if (!planType) {
+    throw new AppError(`${fieldPath}.planType is required`, 400);
+  }
 
-    const defaults = defaultPlanMap[plan.planType];
-    const audienceRole = normalizeText(plan.audienceRole || defaults.audienceRole);
-    const tier = normalizeText(plan.tier || defaults.tier);
+  const defaults = defaultPlanMap[planType] || {};
+  const defaultTitle = defaults.title || planType;
+  const audienceRole = normalizeText(
+    plan.audienceRole || defaults.audienceRole || inferAudienceRoleFromPlanType(planType)
+  );
+  const tier = normalizeText(plan.tier || defaults.tier || inferTierFromPlanType(planType));
 
-    if (!pricingAudienceRoles.includes(audienceRole)) {
-      throw new AppError(`plans[${index}].audienceRole must be investor or investee`, 400);
-    }
+  if (!pricingAudienceRoles.includes(audienceRole)) {
+    throw new AppError(`${fieldPath}.audienceRole must be investor or investee`, 400);
+  }
 
-    if (!pricingPlanTiers.includes(tier)) {
-      throw new AppError(`plans[${index}].tier must be basic or pro`, 400);
-    }
+  if (!pricingPlanTiers.includes(tier)) {
+    throw new AppError(`${fieldPath}.tier must be basic or pro`, 400);
+  }
 
-    const title = normalizeText(plan.title || defaults.title);
-    const description = normalizeOptionalText(plan.description || defaults.description);
-    const currency = normalizeText(plan.currency || DEFAULT_CURRENCY).toLowerCase();
-    const pricePerMonth = parseNumber(plan.pricePerMonth, `plans[${index}].pricePerMonth`);
-    const discountMonthly = parseNumber(
-      plan.discountMonthly,
-      `plans[${index}].discountMonthly`
-    );
-    const discountAnnually = parseNumber(
-      plan.discountAnnually,
-      `plans[${index}].discountAnnually`
-    );
-    const features = sanitizeStringArray(plan.features || [], `plans[${index}].features`);
-    const subscriptionTopics = sanitizeStringArray(
-      plan.subscriptionTopics || defaults.subscriptionTopics,
-      `plans[${index}].subscriptionTopics`
-    );
+  const title = normalizeText(plan.title || defaultTitle);
+  const description = normalizeOptionalText(plan.description || defaults.description);
+  const currency = normalizeText(plan.currency || DEFAULT_CURRENCY).toLowerCase();
+  const pricePerMonth = parseNumber(plan.pricePerMonth, `${fieldPath}.pricePerMonth`);
+  const discountMonthly = parseNumber(plan.discountMonthly, `${fieldPath}.discountMonthly`);
+  const discountAnnually = parseNumber(plan.discountAnnually, `${fieldPath}.discountAnnually`);
+  const features = sanitizeStringArray(plan.features || [], `${fieldPath}.features`);
+  const subscriptionTopics = sanitizeStringArray(
+    plan.subscriptionTopics || defaults.subscriptionTopics || [title],
+    `${fieldPath}.subscriptionTopics`
+  );
 
-    ensureRange(pricePerMonth, `plans[${index}].pricePerMonth`, 0, Number.MAX_SAFE_INTEGER);
-    ensureRange(discountMonthly, `plans[${index}].discountMonthly`, 0, 100);
-    ensureRange(discountAnnually, `plans[${index}].discountAnnually`, 0, 100);
-    const { monthlyPrice, annualPrice } = calculateDiscountedPrices({
-      pricePerMonth,
-      discountMonthly,
-      discountAnnually,
-    });
-
-    return {
-      planType: plan.planType,
-      audienceRole,
-      tier,
-      title: title || defaults.title,
-      description,
-      currency: currency || DEFAULT_CURRENCY,
-      pricePerMonth,
-      discountMonthly,
-      discountAnnually,
-      monthlyPrice,
-      annualPrice,
-      features,
-      subscriptionTopics,
-      isActive: typeof plan.isActive === "boolean" ? plan.isActive : true,
-      stripeProductId: normalizeOptionalText(plan.stripeProductId),
-      stripeMonthlyPriceId: normalizeOptionalText(plan.stripeMonthlyPriceId),
-      stripeAnnualPriceId: normalizeOptionalText(plan.stripeAnnualPriceId),
-    };
+  ensureRange(pricePerMonth, `${fieldPath}.pricePerMonth`, 0, Number.MAX_SAFE_INTEGER);
+  ensureRange(discountMonthly, `${fieldPath}.discountMonthly`, 0, 100);
+  ensureRange(discountAnnually, `${fieldPath}.discountAnnually`, 0, 100);
+  const { monthlyPrice, annualPrice } = calculateDiscountedPrices({
+    pricePerMonth,
+    discountMonthly,
+    discountAnnually,
   });
+
+  return {
+    planType,
+    audienceRole,
+    tier,
+    title: title || defaults.title,
+    description,
+    currency: currency || DEFAULT_CURRENCY,
+    pricePerMonth,
+    discountMonthly,
+    discountAnnually,
+    monthlyPrice,
+    annualPrice,
+    features,
+    subscriptionTopics,
+    isActive: typeof plan.isActive === "boolean" ? plan.isActive : true,
+    stripeProductId: normalizeOptionalText(plan.stripeProductId),
+    stripeMonthlyPriceId: normalizeOptionalText(plan.stripeMonthlyPriceId),
+    stripeAnnualPriceId: normalizeOptionalText(plan.stripeAnnualPriceId),
+  };
+};
+
+const sanitizePlans = (plans) => {
+  if (!Array.isArray(plans) || plans.length === 0) {
+    throw new AppError("plans must be a non-empty array", 400);
+  }
+
+  const normalizedPlans = plans.map((plan, index) => sanitizePlan(plan, `plans[${index}]`));
 
   const uniquePlanTypes = new Set(normalizedPlans.map((plan) => plan.planType));
 
-  if (uniquePlanTypes.size !== pricingPlanTypes.length) {
-    throw new AppError("plans must contain each supported planType exactly once", 400);
+  if (uniquePlanTypes.size !== normalizedPlans.length) {
+    throw new AppError("plans must not contain duplicate planType values", 400);
   }
 
-  return pricingPlanTypes.map((planType) =>
-    normalizedPlans.find((plan) => plan.planType === planType)
-  );
+  return sortPricingPlans(normalizedPlans);
 };
 
 const serializePricingPlan = (plan) => ({
+  _id: plan._id || null,
   planType: plan.planType,
   audienceRole: plan.audienceRole || inferAudienceRoleFromPlanType(plan.planType),
   tier: plan.tier || inferTierFromPlanType(plan.planType),
@@ -422,34 +428,40 @@ const serializePricingPlan = (plan) => ({
   stripeAnnualPriceId: plan.stripeAnnualPriceId || "",
 });
 
-const serializePricing = (pricing) => {
-  if (!pricing) {
-    return {
-      _id: null,
-      plans: buildDefaultPlans().map(serializePricingPlan),
-      lastModifiedBy: null,
-      lastModifiedAt: null,
-      isConfigured: false,
-      createdAt: null,
-      updatedAt: null,
-    };
-  }
+const sortPricingPlans = (plans) =>
+  [
+    ...pricingPlanTypes
+      .map((planType) => plans.find((plan) => plan.planType === planType))
+      .filter(Boolean),
+    ...plans
+      .filter((plan) => !pricingPlanTypes.includes(plan.planType))
+      .sort((first, second) => String(first.planType).localeCompare(String(second.planType))),
+  ];
+
+const serializeModifier = (lastModifiedBy) =>
+  lastModifiedBy
+    ? {
+        _id: lastModifiedBy._id,
+        name: lastModifiedBy.name,
+        email: lastModifiedBy.email,
+        role: lastModifiedBy.role,
+      }
+    : null;
+
+const serializePricing = (plans = []) => {
+  const sortedPlans = sortPricingPlans(plans);
+  const lastModifiedPlan = sortedPlans
+    .filter((plan) => plan.lastModifiedAt)
+    .sort((first, second) => new Date(second.lastModifiedAt) - new Date(first.lastModifiedAt))[0];
 
   return {
-    _id: pricing._id,
-    plans: pricing.plans.map(serializePricingPlan),
-    lastModifiedBy: pricing.lastModifiedBy
-      ? {
-          _id: pricing.lastModifiedBy._id,
-          name: pricing.lastModifiedBy.name,
-          email: pricing.lastModifiedBy.email,
-          role: pricing.lastModifiedBy.role,
-        }
-      : null,
-    lastModifiedAt: pricing.lastModifiedAt,
-    isConfigured: true,
-    createdAt: pricing.createdAt,
-    updatedAt: pricing.updatedAt,
+    _id: null,
+    plans: sortedPlans.map(serializePricingPlan),
+    lastModifiedBy: serializeModifier(lastModifiedPlan?.lastModifiedBy),
+    lastModifiedAt: lastModifiedPlan?.lastModifiedAt || null,
+    isConfigured: sortedPlans.length > 0,
+    createdAt: null,
+    updatedAt: null,
   };
 };
 
@@ -641,16 +653,6 @@ const syncPlansWithStripe = async (plans) => {
   }
 
   return syncedPlans;
-};
-
-const getPlanFromPricing = (pricing, planType) => {
-  const plan = pricing.plans.find((item) => item.planType === planType);
-
-  if (!plan) {
-    throw new AppError("Pricing plan not found", 404);
-  }
-
-  return plan;
 };
 
 const validateBillingCycle = (billingCycle) => {
@@ -963,12 +965,12 @@ const syncLocalSubscriptionWithStripe = async (subscription) => {
 
   const stripe = getStripeClient();
   const user = await getUserOrThrow(subscription.user._id || subscription.user);
-  const pricing = await Pricing.findOne();
+  const pricing = await Pricing.findOne({ planType: subscription.planType });
   const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId, {
     expand: ["latest_invoice.payment_intent", "items.data.price"],
   });
   const plan = pricing
-    ? getPlanFromPricing(pricing, subscription.planType)
+    ? pricing
     : {
         planType: subscription.planType,
         tier: subscription.planTier,
@@ -1047,131 +1049,106 @@ const computePlanPreview = ({ user, plan, billingCycle, subscriptionTopic }) => 
 };
 
 export const getPricing = async ({ role, includeInactive = false } = {}) => {
-  const pricing = await Pricing.findOne().populate("lastModifiedBy", "name email role");
-  const serializedPricing = serializePricing(pricing);
   const normalizedRole = normalizeOptionalText(role);
+  const shouldIncludeInactive = normalizeBoolean(includeInactive);
+  const filters = {};
 
-  if (!normalizedRole) {
-    return serializedPricing;
+  if (normalizedRole) {
+    filters.audienceRole = normalizedRole;
   }
 
-  return {
-    ...serializedPricing,
-    plans: serializedPricing.plans.filter((plan) => {
-      if (plan.audienceRole !== normalizedRole) {
-        return false;
-      }
+  if (!shouldIncludeInactive) {
+    filters.isActive = true;
+  }
 
-      if (!includeInactive && !plan.isActive) {
-        return false;
-      }
+  const plans = await Pricing.find(filters).populate("lastModifiedBy", "name email role");
 
-      return true;
-    }),
-  };
+  return serializePricing(plans);
 };
 
 export const getPublicPlans = async ({ role, includeInactive = false } = {}) => {
-  const pricing = await Pricing.findOne();
-  const basePricing = pricing || { plans: buildDefaultPlans() };
   const normalizedRole = normalizeOptionalText(role);
+  const shouldIncludeInactive = normalizeBoolean(includeInactive);
+  const filters = {};
 
-  const plans = basePricing.plans.filter((plan) => {
-    if (normalizedRole && plan.audienceRole !== normalizedRole) {
-      return false;
-    }
+  if (normalizedRole) {
+    filters.audienceRole = normalizedRole;
+  }
 
-    if (!includeInactive && !plan.isActive) {
-      return false;
-    }
+  if (!shouldIncludeInactive) {
+    filters.isActive = true;
+  }
 
-    return true;
-  });
+  const plans = await Pricing.find(filters);
 
-  return plans.map(serializePricingPlan);
+  return sortPricingPlans(plans).map(serializePricingPlan);
+};
+
+export const getPublicPlanByType = async (planType, { includeInactive = false } = {}) => {
+  const plan = await getPricingPlanByTypeOrThrow(planType);
+
+  if (!normalizeBoolean(includeInactive) && !plan.isActive) {
+    throw new AppError("Pricing plan not found", 404);
+  }
+
+  return serializePricingPlan(plan);
 };
 
 export const getAdminPlanConfigs = async () => {
-  const pricing = await Pricing.findOne().populate("lastModifiedBy", "name email role");
-  const normalizedPricing = pricing || {
-    _id: null,
-    plans: buildDefaultPlans(),
-    lastModifiedBy: null,
-    lastModifiedAt: null,
-  };
+  const plans = await Pricing.find().populate("lastModifiedBy", "name email role");
+  const serializedPricing = serializePricing(plans);
 
   return {
-    pricingId: normalizedPricing._id || null,
-    lastModifiedBy: normalizedPricing.lastModifiedBy
-      ? {
-          _id: normalizedPricing.lastModifiedBy._id,
-          name: normalizedPricing.lastModifiedBy.name,
-          email: normalizedPricing.lastModifiedBy.email,
-          role: normalizedPricing.lastModifiedBy.role,
-        }
-      : null,
-    lastModifiedAt: normalizedPricing.lastModifiedAt || null,
-    plans: normalizedPricing.plans.map(serializePricingPlan),
+    pricingId: null,
+    lastModifiedBy: serializedPricing.lastModifiedBy,
+    lastModifiedAt: serializedPricing.lastModifiedAt,
+    plans: serializedPricing.plans,
   };
 };
 
 export const getAdminPlanConfigByType = async (planType) => {
-  if (!pricingPlanTypes.includes(planType)) {
-    throw new AppError(`planType must be one of: ${pricingPlanTypes.join(", ")}`, 400);
-  }
-
-  const planConfigs = await getAdminPlanConfigs();
-  const plan = planConfigs.plans.find((item) => item.planType === planType);
+  const plan = await getPricingPlanByTypeOrThrow(planType);
 
   return {
-    pricingId: planConfigs.pricingId,
-    lastModifiedBy: planConfigs.lastModifiedBy,
-    lastModifiedAt: planConfigs.lastModifiedAt,
-    plan,
+    pricingId: plan._id,
+    lastModifiedBy: serializeModifier(plan.lastModifiedBy),
+    lastModifiedAt: plan.lastModifiedAt,
+    plan: serializePricingPlan(plan),
   };
 };
 
 export const updateAdminPlanConfig = async (authUser, planType, payload = {}) => {
   await getUserOrThrow(authUser.userId);
 
-  if (!pricingPlanTypes.includes(planType)) {
-    throw new AppError(`planType must be one of: ${pricingPlanTypes.join(", ")}`, 400);
+  const normalizedPlanType = normalizeText(planType);
+
+  if (!normalizedPlanType) {
+    throw new AppError("planType is required", 400);
   }
 
-  const currentPricing = await Pricing.findOne();
-  const basePlans = currentPricing?.plans?.length
-    ? currentPricing.plans.map((plan) =>
-        typeof plan.toObject === "function" ? plan.toObject() : { ...plan }
-      )
-    : buildDefaultPlans();
-  const currentPlan =
-    basePlans.find((item) => item.planType === planType) ||
-    buildDefaultPlans().find((item) => item.planType === planType);
+  const currentPricing = await Pricing.findOne({ planType: normalizedPlanType });
+  const currentPlan = currentPricing
+    ? currentPricing.toObject()
+    : getDefaultPlan(normalizedPlanType);
 
   const mergedPlan = {
     ...currentPlan,
     ...payload,
-    planType,
+    planType: normalizedPlanType,
   };
 
-  const sanitizedUpdatedPlan = sanitizePlans(
-    pricingPlanTypes.map((type) => (type === planType
-      ? mergedPlan
-      : basePlans.find((item) => item.planType === type) || buildDefaultPlans().find((item) => item.planType === type)))
-  );
-
-  const syncedPlans = await syncPlansWithStripe(sanitizedUpdatedPlan);
+  const [syncedPlan] = await syncPlansWithStripe([sanitizePlan(mergedPlan)]);
 
   let pricing;
 
   if (!currentPricing) {
     pricing = await Pricing.create({
-      plans: syncedPlans,
+      ...syncedPlan,
       lastModifiedBy: authUser.userId,
       lastModifiedAt: new Date(),
     });
   } else {
-    currentPricing.plans = syncedPlans;
+    Object.assign(currentPricing, syncedPlan);
     currentPricing.lastModifiedBy = authUser.userId;
     currentPricing.lastModifiedAt = new Date();
     await currentPricing.save();
@@ -1179,28 +1156,19 @@ export const updateAdminPlanConfig = async (authUser, planType, payload = {}) =>
   }
 
   const populatedPricing = await Pricing.findById(pricing._id).populate("lastModifiedBy", "name email role");
-  const updatedPlan = populatedPricing.plans.find((item) => item.planType === planType);
 
   return {
     pricingId: populatedPricing._id,
-    lastModifiedBy: populatedPricing.lastModifiedBy
-      ? {
-          _id: populatedPricing.lastModifiedBy._id,
-          name: populatedPricing.lastModifiedBy.name,
-          email: populatedPricing.lastModifiedBy.email,
-          role: populatedPricing.lastModifiedBy.role,
-        }
-      : null,
+    lastModifiedBy: serializeModifier(populatedPricing.lastModifiedBy),
     lastModifiedAt: populatedPricing.lastModifiedAt,
-    plan: serializePricingPlan(updatedPlan),
+    plan: serializePricingPlan(populatedPricing),
   };
 };
 
 export const previewSubscription = async (authUser, payload = {}) => {
   const user = await getUserOrThrow(authUser.userId);
-  const pricing = await getPricingOrThrow();
   const billingCycle = validateBillingCycle(payload.billingCycle);
-  const plan = getPlanFromPricing(pricing, payload.planType);
+  const plan = await getPricingPlanByTypeOrThrow(payload.planType);
   assertPlanMatchesRole(user.role, plan);
 
   return computePlanPreview({
@@ -1214,24 +1182,28 @@ export const previewSubscription = async (authUser, payload = {}) => {
 export const createPricing = async (authUser, payload) => {
   await getUserOrThrow(authUser.userId);
 
-  const existingPricing = await Pricing.findOne();
+  const sanitizedPlan = sanitizePlan(payload);
+  const existingPlan = await Pricing.findOne({ planType: sanitizedPlan.planType });
 
-  if (existingPricing) {
-    throw new AppError("Pricing already exists. Use edit instead.", 409);
+  if (existingPlan) {
+    throw new AppError("Pricing plan already exists. Use edit instead.", 409);
   }
 
-  const sanitizedPlans = sanitizePlans(payload.plans);
-  const syncedPlans = await syncPlansWithStripe(sanitizedPlans);
+  const [syncedPlan] = await syncPlansWithStripe([sanitizedPlan]);
 
   const createdPricing = await Pricing.create({
-    plans: syncedPlans,
+    ...syncedPlan,
     lastModifiedBy: authUser.userId,
     lastModifiedAt: new Date(),
   });
+  const populatedPricing = await Pricing.findById(createdPricing._id).populate("lastModifiedBy", "name email role");
 
-  return serializePricing(
-    await Pricing.findById(createdPricing._id).populate("lastModifiedBy", "name email role")
-  );
+  return {
+    pricingId: populatedPricing._id,
+    lastModifiedBy: serializeModifier(populatedPricing.lastModifiedBy),
+    lastModifiedAt: populatedPricing.lastModifiedAt,
+    plan: serializePricingPlan(populatedPricing),
+  };
 };
 
 export const updatePricing = async (authUser, pricingId, payload) => {
@@ -1244,17 +1216,45 @@ export const updatePricing = async (authUser, pricingId, payload) => {
 
   if (typeof payload.plans !== "undefined") {
     const sanitizedPlans = sanitizePlans(payload.plans);
-    pricing.plans = await syncPlansWithStripe(sanitizedPlans);
+    const syncedPlans = await syncPlansWithStripe(sanitizedPlans);
+
+    for (const plan of syncedPlans) {
+      await Pricing.findOneAndUpdate(
+        { planType: plan.planType },
+        {
+          ...plan,
+          lastModifiedBy: authUser.userId,
+          lastModifiedAt: new Date(),
+        },
+        { upsert: true, setDefaultsOnInsert: true }
+      );
+    }
+
+    const updatedPlans = await Pricing.find().populate("lastModifiedBy", "name email role");
+
+    return serializePricing(updatedPlans);
   }
 
+  const mergedPlan = {
+    ...pricing.toObject(),
+    ...payload,
+    planType: pricing.planType,
+  };
+  const [syncedPlan] = await syncPlansWithStripe([sanitizePlan(mergedPlan)]);
+
+  Object.assign(pricing, syncedPlan);
   pricing.lastModifiedBy = authUser.userId;
   pricing.lastModifiedAt = new Date();
-
   await pricing.save();
 
-  return serializePricing(
-    await Pricing.findById(pricing._id).populate("lastModifiedBy", "name email role")
-  );
+  const updatedPricing = await Pricing.findById(pricing._id).populate("lastModifiedBy", "name email role");
+
+  return {
+    pricingId: updatedPricing._id,
+    lastModifiedBy: serializeModifier(updatedPricing.lastModifiedBy),
+    lastModifiedAt: updatedPricing.lastModifiedAt,
+    plan: serializePricingPlan(updatedPricing),
+  };
 };
 
 export const createSubscription = async (authUser, payload = {}) => {
@@ -1264,8 +1264,8 @@ export const createSubscription = async (authUser, payload = {}) => {
     throw new AppError("Only investor or investee can subscribe to plans", 403);
   }
 
-  const pricing = await getPricingOrThrow();
-  const plan = getPlanFromPricing(pricing, payload.planType);
+  const pricing = await getPricingPlanByTypeOrThrow(payload.planType);
+  const plan = pricing;
   assertPlanMatchesRole(user.role, plan);
   const billingCycle = validateBillingCycle(payload.billingCycle);
   const billingAddress = validateBillingAddress(payload.billingAddress);
@@ -1366,8 +1366,8 @@ export const changeMyPlan = async (authUser, payload = {}) => {
     throw new AppError("No active subscription found", 404);
   }
 
-  const pricing = await getPricingOrThrow();
-  const plan = getPlanFromPricing(pricing, payload.planType);
+  const pricing = await getPricingPlanByTypeOrThrow(payload.planType);
+  const plan = pricing;
   assertPlanMatchesRole(user.role, plan);
   const billingCycle = validateBillingCycle(payload.billingCycle);
   const stripe = getStripeClient();
@@ -1695,8 +1695,8 @@ export const handleStripeWebhookEvent = async (signature, rawBody) => {
     const user = await User.findById(metadata.userId);
 
     if (user) {
-      const pricing = await Pricing.findOne();
-      const matchingPlan = pricing?.plans.find((plan) => plan.planType === metadata.planType);
+      const pricing = await Pricing.findOne({ planType: metadata.planType });
+      const matchingPlan = pricing;
 
       if (matchingPlan) {
         const localSubscription = await upsertLocalSubscriptionFromStripe({

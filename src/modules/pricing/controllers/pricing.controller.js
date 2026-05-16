@@ -28,6 +28,20 @@ export const getPublicPlans = async (req, res, next) => {
   }
 };
 
+export const getPublicPlanByType = async (req, res, next) => {
+  try {
+    const result = await pricingService.getPublicPlanByType(req.params.planType, req.query);
+
+    res.status(200).json({
+      success: true,
+      message: "Plan fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAdminPlanConfigs = async (_req, res, next) => {
   try {
     const result = await pricingService.getAdminPlanConfigs();
