@@ -533,6 +533,27 @@ export const getMySavedLists = async (authUser) => {
   );
 };
 
+export const removeInvestorSavedList = async (authUser, listId) => {
+  assertInvestor(authUser);
+  await getUserOrThrow(authUser.userId);
+
+  const list = await getListOrThrow(listId);
+  const deletedSavedList = await SavedList.findOneAndDelete({
+    investor: authUser.userId,
+    list: list._id,
+  });
+
+  if (!deletedSavedList) {
+    throw new AppError("Saved list not found", 404);
+  }
+
+  return {
+    id: deletedSavedList._id,
+    list: list._id,
+    message: "List removed from saved lists successfully",
+  };
+};
+
 export const updateListViewCount = async (listId, payload) => {
   const list = await getListOrThrow(listId);
   const incrementBy =
