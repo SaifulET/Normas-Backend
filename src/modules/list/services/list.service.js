@@ -533,6 +533,23 @@ export const getMySavedLists = async (authUser) => {
   );
 };
 
+export const getInvestorSavedListStatus = async (authUser, listId) => {
+  assertInvestor(authUser);
+  await getUserOrThrow(authUser.userId);
+
+  const list = await getListOrThrow(listId);
+  const savedList = await SavedList.findOne({
+    investor: authUser.userId,
+    list: list._id,
+  }).select("_id");
+
+  return {
+    list: list._id,
+    isSaved: Boolean(savedList),
+    savedListId: savedList?._id || null,
+  };
+};
+
 export const removeInvestorSavedList = async (authUser, listId) => {
   assertInvestor(authUser);
   await getUserOrThrow(authUser.userId);

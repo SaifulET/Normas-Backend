@@ -10,6 +10,7 @@ router.get("/filter", listController.getFilteredLists);
 router.get("/sectors", listController.getSectorListCounts);
 router.get("/user/me", authenticate, authorize("investor", "investee", "superadmin"), listController.getMyLists);
 router.get("/saved/me", authenticate, authorize("investor"), listController.getMySavedLists);
+router.get("/saved/:listId/status", authenticate, authorize("investor"), listController.getInvestorSavedListStatus);
 router.post("/save", authenticate, authorize("investor"), listController.saveInvestorList);
 router.delete("/saved/:listId", authenticate, authorize("investor"), listController.removeInvestorSavedList);
 router.get("/:listId", listController.getListById);

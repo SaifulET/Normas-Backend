@@ -112,6 +112,20 @@ export const getMySavedLists = async (req, res, next) => {
   }
 };
 
+export const getInvestorSavedListStatus = async (req, res, next) => {
+  try {
+    const result = await listService.getInvestorSavedListStatus(req.user, req.params.listId);
+
+    res.status(200).json({
+      success: true,
+      message: "Saved list status fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const removeInvestorSavedList = async (req, res, next) => {
   try {
     const result = await listService.removeInvestorSavedList(req.user, req.params.listId);
