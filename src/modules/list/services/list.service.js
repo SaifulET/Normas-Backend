@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../models/list.model.js";
+import SavedList from "../models/savedList.model.js";
 
 const allowedStatuses = ["activated", "deactivated", "suspended"];
 const maxDescriptionImageSize = 5 * 1024 * 1024;
@@ -319,6 +320,24 @@ const assertOwnerOrSuperadmin = (authUser, list) => {
   }
 };
 
+const assertInvestor = (authUser) => {
+  if (authUser.role !== "investor") {
+    throw new AppError("Only investors can save lists", 403);
+  }
+};
+
+const populateSavedListQuery = (query) => {
+  return query
+    .populate("investor", "name email role")
+    .populate({
+      path: "list",
+      populate: {
+        path: "user",
+        select: "name email role",
+      },
+    });
+};
+
 const buildCreatePayload = async (authUser, payload) => {
   const fundingTarget = normalizeFundingTarget(payload.fundingTarget);
   const description = await replaceDescriptionImageSources(payload.description, authUser.userId);
@@ -476,6 +495,42 @@ export const getMyLists = async (authUser) => {
   return List.find({ user: authUser.userId })
     .populate("user", "name email role")
     .sort({ createdAt: -1 });
+};
+
+export const saveInvestorList = async (authUser, payload = {}) => {
+  assertInvestor(authUser);
+  await getUserOrThrow(authUser.userId);
+
+  const list = await getListOrThrow(payload.listId);
+
+  const savedList = await SavedList.findOneAndUpdate(
+    {
+      investor: authUser.userId,
+      list: list._id,
+    },
+    {
+      $setOnInsert: {
+        investor: authUser.userId,
+        list: list._id,
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+    }
+  );
+
+  return populateSavedListQuery(SavedList.findById(savedList._id));
+};
+
+export const getMySavedLists = async (authUser) => {
+  assertInvestor(authUser);
+  await getUserOrThrow(authUser.userId);
+
+  return populateSavedListQuery(
+    SavedList.find({ investor: authUser.userId }).sort({ createdAt: -1 })
+  );
 };
 
 export const updateListViewCount = async (listId, payload) => {

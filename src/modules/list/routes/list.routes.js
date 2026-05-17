@@ -9,6 +9,8 @@ router.get("/", listController.getAllLists);
 router.get("/filter", listController.getFilteredLists);
 router.get("/sectors", listController.getSectorListCounts);
 router.get("/user/me", authenticate, authorize("investor", "investee", "superadmin"), listController.getMyLists);
+router.get("/saved/me", authenticate, authorize("investor"), listController.getMySavedLists);
+router.post("/save", authenticate, authorize("investor"), listController.saveInvestorList);
 router.get("/:listId", listController.getListById);
 router.patch("/:listId/views", express.json(), listController.updateListViewCount);
 

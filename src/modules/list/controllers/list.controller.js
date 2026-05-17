@@ -84,6 +84,34 @@ export const getMyLists = async (req, res, next) => {
   }
 };
 
+export const saveInvestorList = async (req, res, next) => {
+  try {
+    const result = await listService.saveInvestorList(req.user, req.body);
+
+    res.status(201).json({
+      success: true,
+      message: "List saved successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMySavedLists = async (req, res, next) => {
+  try {
+    const result = await listService.getMySavedLists(req.user);
+
+    res.status(200).json({
+      success: true,
+      message: "Saved lists fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getListById = async (req, res, next) => {
   try {
     const result = await listService.getListById(req.params.listId);

@@ -11,6 +11,27 @@ export const pricingAudienceRoles = ["investor", "investee"];
 export const pricingPlanTiers = ["basic", "pro"];
 export const billingCycles = ["monthly", "annual"];
 
+const featureComparisonSchema = new mongoose.Schema(
+  {
+    feature: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    value: {
+      type: mongoose.Schema.Types.Mixed,
+      default: true,
+    },
+    isAvailable: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
 const pricingSchema = new mongoose.Schema(
   {
     planType: {
@@ -75,6 +96,10 @@ const pricingSchema = new mongoose.Schema(
     },
     features: {
       type: [String],
+      default: [],
+    },
+    featureComparison: {
+      type: [featureComparisonSchema],
       default: [],
     },
     subscriptionTopics: {

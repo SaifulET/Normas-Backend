@@ -287,6 +287,94 @@ const sanitizeStringArray = (items, fieldName) => {
     .filter(Boolean);
 };
 
+const normalizeFeatureValue = (value) => {
+  if (typeof value === "string") {
+    const normalizedValue = normalizeText(value);
+
+    if (!normalizedValue) {
+      return true;
+    }
+
+    if (normalizedValue.toLowerCase() === "true" || normalizedValue.toLowerCase() === "yes") {
+      return true;
+    }
+
+    if (normalizedValue.toLowerCase() === "false" || normalizedValue.toLowerCase() === "no") {
+      return false;
+    }
+
+    return normalizedValue;
+  }
+
+  if (typeof value === "undefined" || value === null) {
+    return true;
+  }
+
+  return value;
+};
+
+const parseFeatureString = (featureText) => {
+  const normalizedFeature = normalizeText(featureText);
+  const separatorIndex = normalizedFeature.indexOf(":");
+
+  if (separatorIndex === -1) {
+    return {
+      feature: normalizedFeature,
+      value: true,
+      isAvailable: true,
+    };
+  }
+
+  const feature = normalizeText(normalizedFeature.slice(0, separatorIndex));
+  const value = normalizeFeatureValue(normalizedFeature.slice(separatorIndex + 1));
+
+  return {
+    feature,
+    value,
+    isAvailable: value !== false && value !== "-" && value !== "x",
+  };
+};
+
+const sanitizeFeatureComparison = (items = [], fieldName = "featureComparison") => {
+  if (typeof items === "undefined" || items === null) {
+    return [];
+  }
+
+  if (!Array.isArray(items)) {
+    throw new AppError(`${fieldName} must be an array`, 400);
+  }
+
+  return items
+    .map((item, index) => {
+      if (typeof item === "string") {
+        return parseFeatureString(item);
+      }
+
+      if (!item || typeof item !== "object") {
+        throw new AppError(`${fieldName}[${index}] must be an object`, 400);
+      }
+
+      const feature = normalizeText(item.feature || item.name);
+
+      if (!feature) {
+        throw new AppError(`${fieldName}[${index}].feature is required`, 400);
+      }
+
+      const value = normalizeFeatureValue(item.value);
+      const isAvailable =
+        typeof item.isAvailable === "boolean"
+          ? item.isAvailable
+          : value !== false && value !== "-" && value !== "x";
+
+      return {
+        feature,
+        value,
+        isAvailable,
+      };
+    })
+    .filter((item) => item.feature);
+};
+
 const calculateDiscountedPrices = ({
   pricePerMonth,
   discountMonthly,
@@ -338,6 +426,10 @@ const sanitizePlan = (plan, fieldPath = "plan") => {
   const discountMonthly = parseNumber(plan.discountMonthly, `${fieldPath}.discountMonthly`);
   const discountAnnually = parseNumber(plan.discountAnnually, `${fieldPath}.discountAnnually`);
   const features = sanitizeStringArray(plan.features || [], `${fieldPath}.features`);
+  const featureComparison = sanitizeFeatureComparison(
+    plan.featureComparison || [],
+    `${fieldPath}.featureComparison`
+  );
   const subscriptionTopics = sanitizeStringArray(
     plan.subscriptionTopics || defaults.subscriptionTopics || [title],
     `${fieldPath}.subscriptionTopics`
@@ -365,6 +457,7 @@ const sanitizePlan = (plan, fieldPath = "plan") => {
     monthlyPrice,
     annualPrice,
     features,
+    featureComparison,
     subscriptionTopics,
     isActive: typeof plan.isActive === "boolean" ? plan.isActive : true,
     stripeProductId: normalizeOptionalText(plan.stripeProductId),
@@ -421,6 +514,13 @@ const serializePricingPlan = (plan) => ({
         : 0
   ),
   features: Array.isArray(plan.features) ? plan.features : [],
+  featureComparison: Array.isArray(plan.featureComparison)
+    ? plan.featureComparison.map((item) => ({
+        feature: item.feature,
+        value: typeof item.value === "undefined" ? true : item.value,
+        isAvailable: typeof item.isAvailable === "boolean" ? item.isAvailable : true,
+      }))
+    : [],
   subscriptionTopics: Array.isArray(plan.subscriptionTopics) ? plan.subscriptionTopics : [],
   isActive: typeof plan.isActive === "boolean" ? plan.isActive : true,
   stripeProductId: plan.stripeProductId || "",
@@ -464,6 +564,71 @@ const serializePricing = (plans = []) => {
     updatedAt: null,
   };
 };
+
+const getPlanFeatureEntries = (plan) => [
+  ...(Array.isArray(plan.featureComparison)
+    ? plan.featureComparison.map((item) => ({
+        feature: normalizeText(item.feature),
+        value: typeof item.value === "undefined" ? true : item.value,
+        isAvailable: typeof item.isAvailable === "boolean" ? item.isAvailable : true,
+      }))
+    : []),
+  ...(Array.isArray(plan.features)
+    ? plan.features.map(parseFeatureString)
+    : []),
+].filter((item) => item.feature);
+
+const getFeatureValueForPlan = (plan, feature) => {
+  const normalizedFeature = normalizeText(feature).toLowerCase();
+  const entry = getPlanFeatureEntries(plan).find(
+    (item) => item.feature.toLowerCase() === normalizedFeature
+  );
+
+  if (!entry) {
+    return {
+      value: "-",
+      displayValue: "-",
+      type: "empty",
+      isAvailable: false,
+    };
+  }
+
+  if (!entry.isAvailable) {
+    const displayValue = entry.value === false ? "x" : "-";
+
+    return {
+      value: entry.value,
+      displayValue,
+      type: displayValue === "x" ? "cross" : "empty",
+      isAvailable: false,
+    };
+  }
+
+  if (entry.value === true) {
+    return {
+      value: true,
+      displayValue: "check",
+      type: "check",
+      isAvailable: true,
+    };
+  }
+
+  return {
+    value: entry.value,
+    displayValue: String(entry.value),
+    type: "text",
+    isAvailable: true,
+  };
+};
+
+const serializeComparisonPlan = (plan) => ({
+  _id: plan._id,
+  planType: plan.planType,
+  title: plan.title,
+  label: plan.title,
+  audienceRole: plan.audienceRole,
+  tier: plan.tier,
+});
 
 const serializeSubscription = (subscription) => ({
   _id: subscription._id,
@@ -1092,6 +1257,54 @@ export const getPublicPlanByType = async (planType, { includeInactive = false } 
   }
 
   return serializePricingPlan(plan);
+};
+
+export const getFeatureComparison = async ({ role, includeInactive = false } = {}) => {
+  const normalizedRole = normalizeOptionalText(role);
+  const shouldIncludeInactive = normalizeBoolean(includeInactive);
+  const filters = {};
+
+  if (normalizedRole) {
+    filters.audienceRole = normalizedRole;
+  }
+
+  if (!shouldIncludeInactive) {
+    filters.isActive = true;
+  }
+
+  const plans = sortPricingPlans(await Pricing.find(filters));
+  const featureNames = [];
+
+  for (const plan of plans) {
+    for (const entry of getPlanFeatureEntries(plan)) {
+      if (!featureNames.some((feature) => feature.toLowerCase() === entry.feature.toLowerCase())) {
+        featureNames.push(entry.feature);
+      }
+    }
+  }
+
+  return {
+    title: "Comprehensive Feature Comparison",
+    columns: [
+      {
+        key: "features",
+        label: "Features",
+      },
+      ...plans.map((plan) => ({
+        key: plan.planType,
+        label: plan.title,
+        plan: serializeComparisonPlan(plan),
+      })),
+    ],
+    plans: plans.map(serializeComparisonPlan),
+    rows: featureNames.map((feature) => ({
+      feature,
+      cells: plans.reduce((cells, plan) => {
+        cells[plan.planType] = getFeatureValueForPlan(plan, feature);
+        return cells;
+      }, {}),
+    })),
+  };
 };
 
 export const getAdminPlanConfigs = async () => {
