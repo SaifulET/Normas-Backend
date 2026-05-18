@@ -154,6 +154,20 @@ export const getListById = async (req, res, next) => {
   }
 };
 
+export const getRelatedLists = async (req, res, next) => {
+  try {
+    const result = await listService.getRelatedLists(req.params.id);
+
+    res.status(200).json({
+      success: true,
+      message: "Related lists fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateListViewCount = async (req, res, next) => {
   try {
     const result = await listService.updateListViewCount(req.params.listId, req.body);

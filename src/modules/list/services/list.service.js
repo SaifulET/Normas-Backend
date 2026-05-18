@@ -7,6 +7,7 @@ import List from "../models/list.model.js";
 import SavedList from "../models/savedList.model.js";
 
 const allowedStatuses = ["activated", "deactivated", "suspended"];
+const relatedListLimit = 5;
 const maxDescriptionImageSize = 5 * 1024 * 1024;
 const maxDescriptionImageCount = 10;
 const maxDescriptionImagesTotalSize = 10 * 1024 * 1024;
@@ -33,6 +34,8 @@ const parseStringList = (value) => {
 const buildCaseInsensitiveInFilter = (values) => ({
   $in: values.map((value) => new RegExp(`^${escapeRegex(value)}$`, "i")),
 });
+
+const buildCaseInsensitiveExactFilter = (value) => new RegExp(`^${escapeRegex(value)}$`, "i");
 
 const parsePagination = ({ page = 1, limit = 12 } = {}) => {
   const normalizedPage = Math.max(Number(page) || 1, 1);
@@ -338,6 +341,91 @@ const populateSavedListQuery = (query) => {
     });
 };
 
+const populateListQuery = (query) => query.populate("user", "name email role");
+
+const appendRelatedLists = async ({ results, excludedIds, filters, limit }) => {
+  const remaining = limit - results.length;
+
+  if (remaining <= 0) {
+    return;
+  }
+
+  const lists = await populateListQuery(
+    List.find({
+      status: "activated",
+      ...filters,
+      _id: {
+        $nin: Array.from(excludedIds),
+      },
+    })
+      .sort({ createdAt: -1 })
+      .limit(remaining)
+  );
+
+  for (const list of lists) {
+    const listId = list._id.toString();
+    results.push(list);
+    excludedIds.add(listId);
+  }
+};
+
+const appendRandomRelatedLists = async ({ results, excludedIds, limit }) => {
+  const remaining = limit - results.length;
+
+  if (remaining <= 0) {
+    return;
+  }
+
+  const sampledLists = await List.aggregate([
+    {
+      $match: {
+        status: "activated",
+        _id: {
+          $nin: Array.from(excludedIds).map((id) => new mongoose.Types.ObjectId(id)),
+        },
+      },
+    },
+    {
+      $sample: {
+        size: remaining,
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+      },
+    },
+  ]);
+  const sampledIds = sampledLists.map((list) => list._id);
+
+  if (sampledIds.length === 0) {
+    return;
+  }
+
+  const listsById = new Map(
+    (
+      await populateListQuery(
+        List.find({
+          _id: {
+            $in: sampledIds,
+          },
+        })
+      )
+    ).map((list) => [list._id.toString(), list])
+  );
+
+  for (const sampledId of sampledIds) {
+    const list = listsById.get(sampledId.toString());
+
+    if (!list) {
+      continue;
+    }
+
+    results.push(list);
+    excludedIds.add(list._id.toString());
+  }
+};
+
 const buildCreatePayload = async (authUser, payload) => {
   const fundingTarget = normalizeFundingTarget(payload.fundingTarget);
   const description = await replaceDescriptionImageSources(payload.description, authUser.userId);
@@ -486,7 +574,60 @@ export const getSectorListCounts = async (query = {}) => {
 
 export const getListById = async (listId) => {
   const list = await getListOrThrow(listId);
-  return List.findById(list._id).populate("user", "name email role");
+  return populateListQuery(List.findById(list._id));
+};
+
+export const getRelatedLists = async (listId) => {
+  const referenceList = await getListOrThrow(listId);
+  const referenceId = referenceList._id.toString();
+  const excludedIds = new Set([referenceId]);
+  const results = [];
+  const sector = normalizeText(referenceList.sector);
+  const stage = normalizeText(referenceList.stage);
+  const sectorFilter = sector ? buildCaseInsensitiveExactFilter(sector) : null;
+  const stageFilter = stage ? buildCaseInsensitiveExactFilter(stage) : null;
+
+  if (sectorFilter && stageFilter) {
+    await appendRelatedLists({
+      results,
+      excludedIds,
+      filters: {
+        sector: sectorFilter,
+        stage: stageFilter,
+      },
+      limit: relatedListLimit,
+    });
+  }
+
+  if (sectorFilter) {
+    await appendRelatedLists({
+      results,
+      excludedIds,
+      filters: {
+        sector: sectorFilter,
+      },
+      limit: relatedListLimit,
+    });
+  }
+
+  if (stageFilter) {
+    await appendRelatedLists({
+      results,
+      excludedIds,
+      filters: {
+        stage: stageFilter,
+      },
+      limit: relatedListLimit,
+    });
+  }
+
+  await appendRandomRelatedLists({
+    results,
+    excludedIds,
+    limit: relatedListLimit,
+  });
+
+  return results;
 };
 
 export const getMyLists = async (authUser) => {
