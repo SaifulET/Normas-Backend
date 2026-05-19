@@ -1,5 +1,70 @@
 import * as investmentConversationService from "../services/investmentConversation.service.js";
 
+const emitInvestmentEvent = (req, conversationId, eventName, payload) => {
+  req.app
+    .get("io")
+    ?.to(investmentConversationService.buildSocketRoomName(conversationId))
+    .emit(eventName, payload);
+};
+
+const emitInvestmentMessageToRoom = async (req, conversationId, messageId) => {
+  const io = req.app.get("io");
+
+  if (!io) {
+    return;
+  }
+
+  const room = investmentConversationService.buildSocketRoomName(conversationId);
+  const sockets = await io.in(room).fetchSockets();
+
+  await Promise.all(
+    sockets.map(async (socket) => {
+      const authUser = socket.data.investmentAuthUser;
+
+      if (!authUser) {
+        return;
+      }
+
+      const payload = await investmentConversationService.buildMessageEventPayloadForViewer(
+        authUser,
+        conversationId,
+        messageId
+      );
+
+      socket.emit("investment:message", payload);
+    })
+  );
+};
+
+const emitInvestmentSeenToRoom = async (req, conversationId, seenMessageIds) => {
+  const io = req.app.get("io");
+
+  if (!io) {
+    return;
+  }
+
+  const room = investmentConversationService.buildSocketRoomName(conversationId);
+  const sockets = await io.in(room).fetchSockets();
+
+  await Promise.all(
+    sockets.map(async (socket) => {
+      const authUser = socket.data.investmentAuthUser;
+
+      if (!authUser) {
+        return;
+      }
+
+      const payload = await investmentConversationService.buildSeenEventPayloadForViewer(
+        authUser,
+        conversationId,
+        seenMessageIds
+      );
+
+      socket.emit("investment:messages-seen", payload);
+    })
+  );
+};
+
 export const createOrGetConversation = async (req, res, next) => {
   try {
     const result = await investmentConversationService.createOrGetConversation(req.user, req.body);
@@ -65,6 +130,10 @@ export const getConversationById = async (req, res, next) => {
       req.params.conversationId
     );
 
+    if (result.seenMessageIds.length > 0) {
+      await emitInvestmentSeenToRoom(req, req.params.conversationId, result.seenMessageIds);
+    }
+
     res.status(200).json({
       success: true,
       message: "Investment conversation fetched successfully",
@@ -100,6 +169,10 @@ export const markConversationAsSeen = async (req, res, next) => {
       req.params.conversationId
     );
 
+    if (result.seenMessageIds.length > 0) {
+      await emitInvestmentSeenToRoom(req, req.params.conversationId, result.seenMessageIds);
+    }
+
     res.status(200).json({
       success: true,
       message: "Conversation messages marked as seen successfully",
@@ -118,6 +191,8 @@ export const createConversationMessage = async (req, res, next) => {
       req.body
     );
 
+    await emitInvestmentMessageToRoom(req, req.params.conversationId, result.messageId);
+
     res.status(201).json({
       success: true,
       message: "Conversation message sent successfully",
@@ -135,6 +210,11 @@ export const createMeetingRequest = async (req, res, next) => {
       req.params.conversationId,
       req.body
     );
+
+    emitInvestmentEvent(req, req.params.conversationId, "investment:meeting-request", {
+      conversationId: req.params.conversationId,
+      meetingRequest: result,
+    });
 
     res.status(201).json({
       success: true,
@@ -210,6 +290,13 @@ export const updateMeetingRequestStatus = async (req, res, next) => {
       req.params.meetingRequestId,
       req.body
     );
+
+    const conversationId = result.conversation.toString();
+
+    emitInvestmentEvent(req, conversationId, "investment:meeting-request-updated", {
+      conversationId,
+      meetingRequest: result,
+    });
 
     res.status(200).json({
       success: true,

@@ -4,6 +4,95 @@ Base URL: `http://localhost:5000/api/v1/investment-conversations`
 
 Use `Authorization: Bearer <access_token>` for every request below.
 
+## Socket.IO realtime
+
+Socket URL: `http://localhost:5000`
+
+You can pass the access token either in the event payload as `token` or in the Socket.IO auth object:
+
+```js
+const socket = io("http://localhost:5000", {
+  auth: { token: accessToken }
+});
+```
+
+### Join a conversation room
+
+Client emits:
+
+```js
+socket.emit("investment:join", {
+  conversationId: "CONVERSATION_ID",
+  token: "ACCESS_TOKEN"
+}, callback);
+```
+
+Joining validates access, joins room `investment:<conversationId>`, and marks incoming unseen messages as seen.
+
+### Send message in realtime
+
+Client emits after joining:
+
+```js
+socket.emit("investment:send-message", {
+  conversationId: "CONVERSATION_ID",
+  message: "We are available next Wednesday at 10:00 AM."
+}, callback);
+```
+
+Server broadcasts to joined clients:
+
+`investment:message`
+
+```json
+{
+  "conversationId": "CONVERSATION_ID",
+  "message": {},
+  "conversation": {},
+  "senderUser": {},
+  "receiverUser": {},
+  "receiverUnseenMessageCount": 1
+}
+```
+
+The REST endpoint `POST /:conversationId/messages` also broadcasts the same `investment:message` event.
+
+`message.direction` is calculated per connected socket user. The sender receives `outgoing`; the receiver receives `incoming`.
+
+### Mark messages as seen in realtime
+
+Client emits after joining:
+
+```js
+socket.emit("investment:mark-seen", {
+  conversationId: "CONVERSATION_ID"
+}, callback);
+```
+
+Server broadcasts when any messages changed:
+
+`investment:messages-seen`
+
+```json
+{
+  "conversationId": "CONVERSATION_ID",
+  "seenMessageIds": ["MESSAGE_ID"],
+  "conversation": {}
+}
+```
+
+The REST endpoints `GET /:conversationId` and `PATCH /:conversationId/seen` also broadcast `investment:messages-seen` when new messages are marked seen.
+
+### Meeting request realtime events
+
+The REST endpoint `POST /:conversationId/meeting-requests` broadcasts:
+
+`investment:meeting-request`
+
+The REST endpoint `PATCH /meeting-requests/:meetingRequestId/status` broadcasts:
+
+`investment:meeting-request-updated`
+
 ## 1. Create or get a conversation
 
 `POST /`

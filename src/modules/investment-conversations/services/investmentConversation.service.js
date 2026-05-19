@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import jwt from "jsonwebtoken";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../../list/models/list.model.js";
@@ -14,6 +15,8 @@ const listProjection =
 const userProjection = "name email role profileImage";
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+const buildConversationRoom = (conversationId) => `investment:${conversationId}`;
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -816,6 +819,8 @@ export const createConversationMessage = async (authUser, conversationId, payloa
     : 0;
 
   return {
+    room: buildConversationRoom(conversationId),
+    messageId: savedMessage._id,
     conversation: serializeConversation(savedConversation, {
       currentUserId: authUser.userId,
       superadmins,
@@ -851,6 +856,99 @@ export const createMeetingRequest = async (authUser, conversationId, payload = {
   const meetingRequest = await getMeetingRequestOrThrow(createdMeetingRequest._id);
 
   return serializeMeetingRequest(meetingRequest);
+};
+
+export const buildSocketRoomName = buildConversationRoom;
+
+export const buildMessageEventPayloadForViewer = async (authUser, conversationId, messageId) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  assertConversationAccess(authUser, conversation);
+
+  const message = conversation.messages.id(messageId);
+
+  if (!message) {
+    throw new AppError("Conversation message not found", 404);
+  }
+
+  const superadmins = await getSuperadmins();
+  const senderId = getMessageSenderId(message);
+  const receiverUser = getConversationOtherUser(conversation, senderId);
+  const receiverUnseenMessageCount = receiverUser
+    ? countUnreadMessages(conversation.messages, receiverUser._id)
+    : 0;
+
+  return {
+    conversationId: conversation._id,
+    message: serializeMessageForViewer(message, authUser.userId),
+    conversation: serializeConversation(conversation, {
+      currentUserId: authUser.userId,
+      superadmins,
+    }),
+    senderUser: serializeUser(message.senderUser),
+    receiverUser: serializeUser(receiverUser),
+    receiverUnseenMessageCount,
+  };
+};
+
+export const buildSeenEventPayloadForViewer = async (authUser, conversationId, seenMessageIds) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  assertConversationAccess(authUser, conversation);
+
+  const superadmins = await getSuperadmins();
+  const serializedConversation = serializeConversation(conversation, {
+    currentUserId: authUser.userId,
+    superadmins,
+  });
+
+  return {
+    conversationId: conversation._id,
+    seenMessageIds,
+    conversation: {
+      ...serializedConversation,
+      seenMessageIds,
+    },
+  };
+};
+
+export const verifySocketIdentity = async ({ token, conversationId }) => {
+  if (!conversationId) {
+    throw new AppError("conversationId is required", 400);
+  }
+
+  const conversation = await getConversationOrThrow(conversationId);
+
+  if (!token) {
+    throw new AppError("Socket authentication is required", 401);
+  }
+
+  let decoded;
+
+  try {
+    decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+  } catch (_error) {
+    throw new AppError("Invalid or expired socket token", 401);
+  }
+
+  const user = await User.findById(decoded.userId);
+
+  if (!user) {
+    throw new AppError("User not found", 404);
+  }
+
+  const authUser = {
+    userId: user._id.toString(),
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  };
+
+  assertAllowedRole(authUser.role);
+  assertConversationAccess(authUser, conversation);
+
+  return {
+    conversation,
+    authUser,
+  };
 };
 
 export const getConversationMeetingRequests = async (authUser, conversationId, query = {}) => {
