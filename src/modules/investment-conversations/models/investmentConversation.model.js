@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+export const investmentConversationStatuses = ["pending", "active"];
+
 const messageSeenSchema = new mongoose.Schema(
   {
     user: {
@@ -75,6 +77,11 @@ const investmentConversationSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    status: {
+      type: String,
+      enum: investmentConversationStatuses,
+      default: "pending",
+    },
   },
   {
     timestamps: true,
@@ -82,6 +89,9 @@ const investmentConversationSchema = new mongoose.Schema(
 );
 
 investmentConversationSchema.index({ list: 1, investor: 1, investee: 1 }, { unique: true });
+investmentConversationSchema.index({ investor: 1, lastMessageAt: -1 });
+investmentConversationSchema.index({ investee: 1, lastMessageAt: -1 });
+investmentConversationSchema.index({ status: 1, lastMessageAt: -1 });
 
 const InvestmentConversation = mongoose.model(
   "InvestmentConversation",

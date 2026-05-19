@@ -18,11 +18,39 @@ export const createOrGetConversation = async (req, res, next) => {
 
 export const getMyConversations = async (req, res, next) => {
   try {
-    const result = await investmentConversationService.getMyConversations(req.user);
+    const result = await investmentConversationService.getMyConversations(req.user, req.query);
 
     res.status(200).json({
       success: true,
       message: "Investment conversations fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMyConversationInbox = async (req, res, next) => {
+  try {
+    const result = await investmentConversationService.getMyConversationInbox(req.user, req.query);
+
+    res.status(200).json({
+      success: true,
+      message: "Conversation inbox fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getConversationRequests = async (req, res, next) => {
+  try {
+    const result = await investmentConversationService.getConversationRequests(req.user);
+
+    res.status(200).json({
+      success: true,
+      message: "Conversation requests fetched successfully",
       data: result,
     });
   } catch (error) {
@@ -40,6 +68,24 @@ export const getConversationById = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: "Investment conversation fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getConversationMessages = async (req, res, next) => {
+  try {
+    const result = await investmentConversationService.getConversationMessages(
+      req.user,
+      req.params.conversationId,
+      req.query
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Conversation messages fetched successfully",
       data: result,
     });
   } catch (error) {

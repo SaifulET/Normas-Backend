@@ -2,7 +2,9 @@ import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../../list/models/list.model.js";
-import InvestmentConversation from "../models/investmentConversation.model.js";
+import InvestmentConversation, {
+  investmentConversationStatuses,
+} from "../models/investmentConversation.model.js";
 import MeetingRequest, { meetingRequestStatuses } from "../models/meetingRequest.model.js";
 
 const allowedConversationRoles = ["investor", "investee", "superadmin"];
@@ -183,6 +185,97 @@ const countUnreadMessages = (messages = [], userId) =>
     return hasSeenMessage(message, userId) ? count : count + 1;
   }, 0);
 
+const getMessageSenderId = (message) => String(message.senderUser?._id || message.senderUser);
+
+const sortMessagesBySentAt = (messages = []) =>
+  [...messages].sort(
+    (firstMessage, secondMessage) => new Date(firstMessage.sentAt) - new Date(secondMessage.sentAt)
+  );
+
+const getLastIncomingMessage = (messages = [], currentUserId) => {
+  const incomingMessages = sortMessagesBySentAt(messages).filter(
+    (message) => getMessageSenderId(message) !== String(currentUserId)
+  );
+
+  return incomingMessages[incomingMessages.length - 1] || null;
+};
+
+const getConversationOtherUser = (conversation, currentUserId) => {
+  const viewerId = String(currentUserId);
+
+  if (String(conversation.investor?._id || conversation.investor) === viewerId) {
+    return conversation.investee;
+  }
+
+  if (String(conversation.investee?._id || conversation.investee) === viewerId) {
+    return conversation.investor;
+  }
+
+  return conversation.investor;
+};
+
+const getRelativeTimeLabel = (date) => {
+  if (!date) {
+    return "";
+  }
+
+  const diffInSeconds = Math.max(Math.floor((Date.now() - new Date(date).getTime()) / 1000), 0);
+
+  if (diffInSeconds < 60) {
+    return "now";
+  }
+
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes}m`;
+  }
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+
+  if (diffInHours < 24) {
+    return `${diffInHours}h`;
+  }
+
+  const diffInDays = Math.floor(diffInHours / 24);
+
+  if (diffInDays < 7) {
+    return `${diffInDays}d`;
+  }
+
+  const diffInWeeks = Math.floor(diffInDays / 7);
+
+  if (diffInWeeks < 5) {
+    return `${diffInWeeks}w`;
+  }
+
+  const diffInMonths = Math.floor(diffInDays / 30);
+
+  if (diffInMonths < 12) {
+    return `${diffInMonths}mo`;
+  }
+
+  return `${Math.floor(diffInDays / 365)}y`;
+};
+
+const validateConversationStatus = (status) => {
+  if (!investmentConversationStatuses.includes(status)) {
+    throw new AppError(`status must be ${investmentConversationStatuses.join(", ")}`, 400);
+  }
+
+  return status;
+};
+
+const parsePositiveInteger = (value, defaultValue, fieldName, maxValue = 100) => {
+  const parsedValue = Number(value || defaultValue);
+
+  if (!Number.isInteger(parsedValue) || parsedValue < 1) {
+    throw new AppError(`${fieldName} must be a positive integer`, 400);
+  }
+
+  return Math.min(parsedValue, maxValue);
+};
+
 const serializeUser = (user) => {
   if (!user) {
     return null;
@@ -237,27 +330,74 @@ const serializeMessage = (message) => ({
   })),
 });
 
+const serializeMessageForViewer = (message, currentUserId) => ({
+  ...serializeMessage(message),
+  direction: getMessageSenderId(message) === String(currentUserId) ? "outgoing" : "incoming",
+  isSeen: hasSeenMessage(message, currentUserId),
+});
+
 const serializeConversation = (conversation, options = {}) => {
   const currentUserId = options.currentUserId ? String(options.currentUserId) : null;
-  const messages = [...conversation.messages].sort(
-    (firstMessage, secondMessage) => new Date(firstMessage.sentAt) - new Date(secondMessage.sentAt)
-  );
+  const messages = sortMessagesBySentAt(conversation.messages);
   const lastMessage = messages[messages.length - 1] || null;
 
   return {
     _id: conversation._id,
+    conversationStatus: conversation.status || "pending",
+    status: conversation.status || "pending",
     list: serializeList(conversation.list),
     investor: serializeUser(conversation.investor),
     investee: serializeUser(conversation.investee),
+    otherUserInfo: currentUserId ? serializeUser(getConversationOtherUser(conversation, currentUserId)) : null,
     superadmins: (options.superadmins || []).map(serializeUser),
     createdBy: serializeUser(conversation.createdBy),
-    messages: messages.map(serializeMessage),
+    messages: currentUserId
+      ? messages.map((message) => serializeMessageForViewer(message, currentUserId))
+      : messages.map(serializeMessage),
     messageCount: messages.length,
     unreadCount: currentUserId ? countUnreadMessages(messages, currentUserId) : 0,
-    lastMessage: lastMessage ? serializeMessage(lastMessage) : null,
+    lastMessage: lastMessage
+      ? currentUserId
+        ? serializeMessageForViewer(lastMessage, currentUserId)
+        : serializeMessage(lastMessage)
+      : null,
     lastMessageAt: conversation.lastMessageAt,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+  };
+};
+
+const serializeConversationInboxItem = (conversation, currentUserId) => {
+  const viewerId = String(currentUserId);
+  const messages = sortMessagesBySentAt(conversation.messages);
+  const lastMessage = messages[messages.length - 1] || null;
+  const lastIncomingMessage = getLastIncomingMessage(messages, viewerId);
+  const otherUserInfo = getConversationOtherUser(conversation, viewerId);
+  const lastActivityAt = conversation.lastMessageAt || lastMessage?.sentAt || conversation.updatedAt;
+  const unseenMessageCount = countUnreadMessages(messages, currentUserId);
+  const latestIncomingAt = lastIncomingMessage?.sentAt || null;
+
+  return {
+    conversationId: conversation._id,
+    otherUserInfo: serializeUser(otherUserInfo),
+    oppositeUser: serializeUser(otherUserInfo),
+    listInfo: serializeList(conversation.list),
+    list: serializeList(conversation.list),
+    lastMessage: lastMessage ? serializeMessageForViewer(lastMessage, currentUserId) : null,
+    lastMessagePreview: lastMessage?.message || "",
+    lastIncomingMessage: lastIncomingMessage
+      ? serializeMessageForViewer(lastIncomingMessage, currentUserId)
+      : null,
+    lastIncomingMessagePreview: lastIncomingMessage?.message || "",
+    unseenMessageCount,
+    unreadCount: unseenMessageCount,
+    conversationStatus: conversation.status || "pending",
+    lastMessageAt: lastActivityAt,
+    lastMessageTime: lastActivityAt,
+    lastMessageTimeAgo: getRelativeTimeLabel(lastActivityAt),
+    timeAgo: getRelativeTimeLabel(latestIncomingAt || lastActivityAt),
+    lastIncomingMessageAt: latestIncomingAt,
+    lastIncomingMessageTimeAgo: getRelativeTimeLabel(latestIncomingAt),
   };
 };
 
@@ -316,7 +456,7 @@ const assertMeetingRequestAccess = (authUser, meetingRequest) => {
   }
 };
 
-const markMessagesSeen = async (conversation, viewerId) => {
+const markMessagesSeen = async (conversation, viewerId, options = {}) => {
   const seenMessageIds = [];
 
   conversation.messages.forEach((message) => {
@@ -333,10 +473,18 @@ const markMessagesSeen = async (conversation, viewerId) => {
     }
   });
 
-  if (seenMessageIds.length === 0) {
+  const previousStatus = conversation.status || "pending";
+  const shouldActivate = options.activatePending && previousStatus === "pending";
+
+  if (shouldActivate) {
+    conversation.status = "active";
+  }
+
+  if (seenMessageIds.length === 0 && !shouldActivate) {
     return {
       conversation,
       seenMessageIds,
+      previousStatus,
     };
   }
 
@@ -345,6 +493,7 @@ const markMessagesSeen = async (conversation, viewerId) => {
   return {
     conversation: await getConversationOrThrow(conversation._id),
     seenMessageIds,
+    previousStatus,
   };
 };
 
@@ -358,6 +507,50 @@ const buildConversationFilters = (authUser) => {
   }
 
   return { investee: authUser.userId };
+};
+
+const buildConversationListFilters = (authUser, query = {}) => {
+  const filters = buildConversationFilters(authUser);
+
+  if (query.status) {
+    const status = validateConversationStatus(query.status);
+
+    if (status === "pending") {
+      filters.$or = [
+        { status },
+        { status: { $exists: false } },
+        { status: null },
+      ];
+    } else {
+      filters.status = status;
+    }
+  }
+
+  return filters;
+};
+
+const getPaginatedMessages = (messages = [], query = {}, currentUserId) => {
+  const page = parsePositiveInteger(query.page, 1, "page", 10000);
+  const limitPairs = parsePositiveInteger(query.limitPairs, 5, "limitPairs", 50);
+  const limitMessages = limitPairs * 2;
+  const sortedMessages = sortMessagesBySentAt(messages);
+  const totalMessages = sortedMessages.length;
+  const endIndex = Math.max(totalMessages - (page - 1) * limitMessages, 0);
+  const startIndex = Math.max(endIndex - limitMessages, 0);
+  const selectedMessages = sortedMessages.slice(startIndex, endIndex);
+
+  return {
+    messages: selectedMessages.map((message) => serializeMessageForViewer(message, currentUserId)),
+    pagination: {
+      page,
+      limitPairs,
+      limitMessages,
+      totalMessages,
+      loadedMessages: selectedMessages.length,
+      hasMore: startIndex > 0,
+      nextPage: startIndex > 0 ? page + 1 : null,
+    },
+  };
 };
 
 const buildMeetingFilters = (authUser, query = {}, defaultStatus) => {
@@ -401,23 +594,40 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
   assertAllowedRole(authUser.role);
 
   const list = await getListOrThrow(payload.listId);
+  const listOwnerId = list.user?._id || list.user;
+
+  if (!listOwnerId) {
+    throw new AppError("List owner not found", 404);
+  }
+
   const investorId =
     authUser.role === "investor"
       ? authUser.userId
       : validateObjectId(payload.investorId, "investorId");
   const investor = await getUserOrThrow(investorId);
   const investeeId =
-    authUser.role === "investee"
-      ? authUser.userId
-      : payload.investeeId
-        ? validateObjectId(payload.investeeId, "investeeId")
-        : null;
+    authUser.role === "investor"
+      ? listOwnerId
+      : authUser.role === "investee"
+        ? authUser.userId
+        : payload.investeeId
+          ? validateObjectId(payload.investeeId, "investeeId")
+          : listOwnerId;
 
-  if ((authUser.role === "investor" || authUser.role === "superadmin") && !investeeId) {
-    throw new AppError("investeeId is required", 400);
+  if (authUser.role === "investor" && String(investor._id) === String(investeeId)) {
+    throw new AppError("You cannot start a conversation with yourself", 400);
+  }
+
+  if (authUser.role === "investor" && normalizeText(payload.initialMessage) === "") {
+    throw new AppError("initialMessage is required", 400);
   }
 
   const investee = await getUserOrThrow(investeeId);
+  const canSetInitialMessage =
+    String(authUser.userId) === String(investor._id) ||
+    String(authUser.userId) === String(investee._id) ||
+    authUser.role === "superadmin";
+  const initialMessage = canSetInitialMessage ? normalizeOptionalText(payload.initialMessage) : "";
 
   let conversation = await buildBaseConversationQuery().findOne({
     list: list._id,
@@ -427,20 +637,18 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
   let created = false;
 
   if (!conversation) {
-    const canSetInitialMessage =
-      authUser.role === "investee" && String(authUser.userId) === String(investee._id);
-    const initialMessage = canSetInitialMessage ? normalizeOptionalText(payload.initialMessage) : "";
+    const sentAt = new Date();
     const messages = initialMessage
       ? [
           {
             senderUser: authUser.userId,
             senderRole: authUser.role,
             message: validateMessage(initialMessage),
-            sentAt: new Date(),
+            sentAt,
             seenBy: [
               {
                 user: authUser.userId,
-                seenAt: new Date(),
+                seenAt: sentAt,
               },
             ],
           },
@@ -453,11 +661,30 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
       investee: investee._id,
       createdBy: authUser.userId,
       messages,
-      lastMessageAt: messages.length > 0 ? new Date() : null,
+      lastMessageAt: messages.length > 0 ? sentAt : null,
+      status: "pending",
     });
 
     conversation = await getConversationOrThrow(createdConversation._id);
     created = true;
+  } else if (initialMessage && conversation.messages.length === 0) {
+    const sentAt = new Date();
+
+    conversation.messages.push({
+      senderUser: authUser.userId,
+      senderRole: authUser.role,
+      message: validateMessage(initialMessage),
+      sentAt,
+      seenBy: [
+        {
+          user: authUser.userId,
+          seenAt: sentAt,
+        },
+      ],
+    });
+    conversation.lastMessageAt = sentAt;
+    await conversation.save();
+    conversation = await getConversationOrThrow(conversation._id);
   }
 
   const superadmins = await getSuperadmins();
@@ -471,12 +698,12 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
   };
 };
 
-export const getMyConversations = async (authUser) => {
+export const getMyConversations = async (authUser, query = {}) => {
   assertAuthenticatedUser(authUser);
   assertAllowedRole(authUser.role);
 
   const conversations = await buildBaseConversationQuery()
-    .find(buildConversationFilters(authUser))
+    .find(buildConversationListFilters(authUser, query))
     .sort({ lastMessageAt: -1, updatedAt: -1 });
   const superadmins = await getSuperadmins();
 
@@ -488,11 +715,35 @@ export const getMyConversations = async (authUser) => {
   );
 };
 
+export const getMyConversationInbox = async (authUser, query = {}) => {
+  assertAuthenticatedUser(authUser);
+  assertAllowedRole(authUser.role);
+
+  const conversations = await buildBaseConversationQuery()
+    .find({
+      ...buildConversationListFilters(authUser, query),
+      "messages.0": {
+        $exists: true,
+      },
+    })
+    .sort({ lastMessageAt: -1, updatedAt: -1 });
+
+  return conversations.map((conversation) =>
+    serializeConversationInboxItem(conversation, authUser.userId)
+  );
+};
+
+export const getConversationRequests = async (authUser) => {
+  return getMyConversationInbox(authUser, { status: "pending" });
+};
+
 export const getConversationById = async (authUser, conversationId) => {
   const conversation = await getConversationOrThrow(conversationId);
   assertConversationAccess(authUser, conversation);
 
-  const seenResult = await markMessagesSeen(conversation, authUser.userId);
+  const seenResult = await markMessagesSeen(conversation, authUser.userId, {
+    activatePending: true,
+  });
   const superadmins = await getSuperadmins();
 
   return {
@@ -501,6 +752,7 @@ export const getConversationById = async (authUser, conversationId) => {
       superadmins,
     }),
     seenMessageIds: seenResult.seenMessageIds,
+    previousConversationStatus: seenResult.previousStatus,
   };
 };
 
@@ -517,6 +769,17 @@ export const markConversationAsSeen = async (authUser, conversationId) => {
       superadmins,
     }),
     seenMessageIds: seenResult.seenMessageIds,
+  };
+};
+
+export const getConversationMessages = async (authUser, conversationId, query = {}) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  assertConversationAccess(authUser, conversation);
+
+  return {
+    conversationId: conversation._id,
+    conversationStatus: conversation.status || "pending",
+    ...getPaginatedMessages(conversation.messages, query, authUser.userId),
   };
 };
 
@@ -540,19 +803,27 @@ export const createConversationMessage = async (authUser, conversationId, payloa
     ],
   });
   conversation.lastMessageAt = sentAt;
+  conversation.status = "active";
 
   await conversation.save();
 
   const savedConversation = await getConversationOrThrow(conversation._id);
   const savedMessage = savedConversation.messages[savedConversation.messages.length - 1];
   const superadmins = await getSuperadmins();
+  const receiverUser = getConversationOtherUser(savedConversation, authUser.userId);
+  const receiverUnseenMessageCount = receiverUser
+    ? countUnreadMessages(savedConversation.messages, receiverUser._id)
+    : 0;
 
   return {
     conversation: serializeConversation(savedConversation, {
       currentUserId: authUser.userId,
       superadmins,
     }),
-    message: serializeMessage(savedMessage),
+    message: serializeMessageForViewer(savedMessage, authUser.userId),
+    senderUser: serializeUser(savedMessage.senderUser),
+    receiverUser: serializeUser(receiverUser),
+    receiverUnseenMessageCount,
   };
 };
 

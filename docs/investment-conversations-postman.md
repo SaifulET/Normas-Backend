@@ -8,14 +8,15 @@ Use `Authorization: Bearer <access_token>` for every request below.
 
 `POST /`
 
-Initial message can only be sent by the `investee`.
+An `investor` can start a conversation with only `listId` and `initialMessage`.
+The API finds the investee from the list owner and creates a `pending` conversation.
 
 ### Investor request body
 
 ```json
 {
   "listId": "LIST_ID",
-  "investeeId": "INVESTEE_USER_ID"
+  "initialMessage": "Hi, I am interested in this opportunity."
 }
 ```
 
@@ -45,13 +46,109 @@ Because one `list` can now be used with multiple different investees, the conver
 
 `listId + investorId + investeeId`
 
+### Response
+
+```json
+{
+  "success": true,
+  "message": "Investment conversation created successfully",
+  "data": {
+    "created": true,
+    "conversation": {
+      "_id": "CONVERSATION_ID",
+      "conversationStatus": "pending",
+      "otherUserInfo": {
+        "_id": "INVESTEE_USER_ID",
+        "name": "Investee Name",
+        "email": "investee@example.com",
+        "role": "investee",
+        "profileImage": ""
+      },
+      "list": {
+        "_id": "LIST_ID",
+        "title": "Carbonledger AI windmill"
+      },
+      "messages": [
+        {
+          "_id": "MESSAGE_ID",
+          "message": "Hi, I am interested in this opportunity.",
+          "direction": "outgoing",
+          "isSeen": true,
+          "sentAt": "2026-05-19T10:00:00.000Z"
+        }
+      ],
+      "unreadCount": 0,
+      "lastMessageAt": "2026-05-19T10:00:00.000Z"
+    }
+  }
+}
+```
+
 ## 2. Get my conversation list
 
 `GET /`
 
+Optional query params:
+
+`status=pending`
+
+`status=active`
+
+## 2.1 Sidebar conversation list
+
+`GET /sidebar`
+
+Alias:
+
+`GET /inbox`
+
+Optional query params:
+
+`status=pending`
+
+`status=active`
+
+Response item:
+
+```json
+{
+  "conversationId": "CONVERSATION_ID",
+  "otherUserInfo": {
+    "_id": "USER_ID",
+    "name": "Carbonledger AI windmill",
+    "email": "user@example.com",
+    "role": "investee",
+    "profileImage": ""
+  },
+  "listInfo": {
+    "_id": "LIST_ID",
+    "title": "Carbonledger AI windmill"
+  },
+  "lastIncomingMessage": {
+    "_id": "MESSAGE_ID",
+    "message": "Hi team, we're experiencing some latency with t...",
+    "direction": "incoming",
+    "sentAt": "2026-05-19T10:00:00.000Z"
+  },
+  "lastIncomingMessagePreview": "Hi team, we're experiencing some latency with t...",
+  "lastMessageTime": "2026-05-19T10:00:00.000Z",
+  "timeAgo": "10m",
+  "unseenMessageCount": 1,
+  "conversationStatus": "pending"
+}
+```
+
+## 2.2 Request list
+
+`GET /requests`
+
+Returns pending conversations for the logged-in investee. For superadmin, returns all pending conversations.
+
 ## 3. Get one conversation
 
 `GET /:conversationId`
+
+Opening a pending conversation marks incoming unseen messages as seen and updates `conversationStatus` from `pending` to `active`.
 
 ## 4. Mark conversation messages as seen
 
@@ -72,6 +169,68 @@ Request body:
 ```json
 {
   "message": "We are available next Wednesday at 10:00 AM."
+}
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "message": "Conversation message sent successfully",
+  "data": {
+    "message": {
+      "_id": "MESSAGE_ID",
+      "message": "We are available next Wednesday at 10:00 AM.",
+      "direction": "outgoing",
+      "isSeen": true,
+      "sentAt": "2026-05-19T10:15:00.000Z"
+    },
+    "senderUser": {
+      "_id": "SENDER_ID",
+      "name": "Sender Name",
+      "role": "investor"
+    },
+    "receiverUser": {
+      "_id": "RECEIVER_ID",
+      "name": "Receiver Name",
+      "role": "investee"
+    },
+    "receiverUnseenMessageCount": 1
+  }
+}
+```
+
+## 5.1 Message list with load more
+
+`GET /:conversationId/messages`
+
+Query params:
+
+`page=1`
+
+`limitPairs=5`
+
+The API returns up to `limitPairs * 2` latest messages. Page `1` returns the newest messages in chronological order. Page `2` loads older messages.
+
+```json
+{
+  "success": true,
+  "message": "Conversation messages fetched successfully",
+  "data": {
+    "conversationId": "CONVERSATION_ID",
+    "conversationStatus": "active",
+    "messages": [],
+    "pagination": {
+      "page": 1,
+      "limitPairs": 5,
+      "limitMessages": 10,
+      "totalMessages": 24,
+      "loadedMessages": 10,
+      "hasMore": true,
+      "nextPage": 2
+    }
+  }
 }
 ```
 
