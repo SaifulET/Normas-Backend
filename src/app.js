@@ -15,23 +15,9 @@ import { optionalAuthenticate } from "./middlewares/optionalAuth.middleware.js";
 
 const app = express();
 
-const allowedOrigins = [
-  process.env.CLIENT_URL,
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://early-n.vercel.app"
-].filter(Boolean);
-
 app.use(
   cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error(`Origin not allowed by CORS: ${origin}`));
-    },
+    origin: true, // allow all origins
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
