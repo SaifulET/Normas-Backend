@@ -11,6 +11,7 @@ import * as pricingController from "./modules/pricing/controllers/pricing.contro
 import reportRoutes from "./modules/report/routes/report.routes.js";
 import supportRoutes from "./modules/support/routes/support.routes.js";
 import investmentConversationRoutes from "./modules/investment-conversations/routes/investmentConversation.routes.js";
+import scheduleRoutes from "./modules/schedule/routes/schedule.routes.js";
 import { optionalAuthenticate } from "./middlewares/optionalAuth.middleware.js";
 
 const app = express();
@@ -46,6 +47,7 @@ app.use("/api/v1/pricing", pricingRoutes);
 app.use("/api/v1/reports", reportRoutes);
 app.use("/api/v1/support", optionalAuthenticate, supportRoutes);
 app.use("/api/v1/investment-conversations", investmentConversationRoutes);
+app.use("/api/v1/schedules", scheduleRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
