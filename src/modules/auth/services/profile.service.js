@@ -51,6 +51,7 @@ const buildProfileResponse = (user, profileImage = user.profileImage) => ({
   email: user.email,
   mobile: user.mobile,
   profileImage,
+  accountStatus: user.accountStatus || "pending",
   taxPercentage: user.taxPercentage,
   socialLinks: user.socialLinks || {},
   role: user.role,

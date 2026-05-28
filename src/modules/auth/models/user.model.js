@@ -65,6 +65,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    accountStatus: {
+      type: String,
+      enum: ["active", "inactive", "pending"],
+      default: "pending",
+    },
     taxPercentage: {
       type: Number,
       default: 0,

@@ -52,6 +52,7 @@ const serializeAuthUser = (user) => ({
   email: user.email,
   mobile: user.mobile || "",
   profileImage: user.profileImage || "",
+  accountStatus: user.accountStatus || "pending",
   taxPercentage: user.taxPercentage ?? 0,
   socialLinks: user.socialLinks || {},
   createdAt: user.createdAt,
