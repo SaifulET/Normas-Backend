@@ -106,7 +106,17 @@ const getConnectionHint = (error) => {
   return "";
 };
 
+let connectionPromise = null;
+
 const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+
+  if (connectionPromise) {
+    return connectionPromise;
+  }
+
   if (!process.env.MONGODB_URI) {
     throw new Error("MONGODB_URI is not set in the environment");
   }
@@ -116,9 +126,12 @@ const connectDB = async () => {
   }
 
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
+    connectionPromise = mongoose.connect(process.env.MONGODB_URI);
+    await connectionPromise;
     console.log("MongoDB connected successfully");
+    return mongoose.connection;
   } catch (error) {
+    connectionPromise = null;
     error.message = `${error.message}${getConnectionHint(error)}`;
     throw error;
   }

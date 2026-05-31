@@ -8,6 +8,20 @@ dotenv.config();
 
 const PORT = process.env.PORT || 5000;
 
+const handleRequest = async (req, res) => {
+  try {
+    await connectDB();
+    return app(req, res);
+  } catch (error) {
+    console.error("Failed to connect to database:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Database connection failed",
+    });
+  }
+};
+
 const startServer = async () => {
   await connectDB();
 
@@ -20,7 +34,11 @@ const startServer = async () => {
   });
 };
 
-startServer().catch((error) => {
-  console.error("Failed to start server:", error.message);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  startServer().catch((error) => {
+    console.error("Failed to start server:", error.message);
+    process.exit(1);
+  });
+}
+
+export default handleRequest;
