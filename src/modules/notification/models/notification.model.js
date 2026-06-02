@@ -7,6 +7,9 @@ export const notificationTypes = [
   "payment_created",
   "user_registered",
   "report_created",
+  "report_action",
+  "pitch_suspended",
+  "pitch_restored",
 ];
 
 const notificationSchema = new mongoose.Schema(

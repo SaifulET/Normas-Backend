@@ -429,6 +429,11 @@ const appendRandomRelatedLists = async ({ results, excludedIds, limit }) => {
 const buildCreatePayload = async (authUser, payload) => {
   const fundingTarget = normalizeFundingTarget(payload.fundingTarget);
   const description = await replaceDescriptionImageSources(payload.description, authUser.userId);
+  const requestedStatus = normalizeText(payload.status);
+  const defaultStatus = "deactivated";
+  const status = authUser.role === "superadmin"
+    ? allowedStatuses.includes(requestedStatus) ? requestedStatus : defaultStatus
+    : ["activated", "deactivated"].includes(requestedStatus) ? requestedStatus : defaultStatus;
 
   return {
     user: authUser.userId,
@@ -441,7 +446,7 @@ const buildCreatePayload = async (authUser, payload) => {
     keyword: payload.keyword || "",
     description,
     additionalDetails: normalizeAdditionalDetails(payload.additionalDetails || []),
-    status: allowedStatuses.includes(payload.status) ? payload.status : "deactivated",
+    status,
   };
 };
 
@@ -669,9 +674,11 @@ export const getMySavedLists = async (authUser) => {
   assertInvestor(authUser);
   await getUserOrThrow(authUser.userId);
 
-  return populateSavedListQuery(
+  const savedLists = await populateSavedListQuery(
     SavedList.find({ investor: authUser.userId }).sort({ createdAt: -1 })
   );
+
+  return savedLists.filter((savedList) => savedList.list?.status === "activated");
 };
 
 export const getInvestorSavedListStatus = async (authUser, listId) => {
@@ -728,15 +735,25 @@ export const updateListViewCount = async (listId, payload) => {
 };
 
 export const changeListStatus = async (authUser, listId, status) => {
-  console.log("changeListStatus called with:", { authUser, listId, status });
   const list = await getListOrThrow(listId);
   assertOwnerOrSuperadmin(authUser, list);
+  const requestedStatus = normalizeText(status);
 
-  if (!allowedStatuses.includes(status)) {
+  if (!allowedStatuses.includes(requestedStatus)) {
     throw new AppError("status must be activated, deactivated, or suspended", 400);
   }
 
-  list.status = status;
+  if (authUser.role !== "superadmin") {
+    if (!["activated", "deactivated"].includes(requestedStatus)) {
+      throw new AppError("Investees can only activate or deactivate their own pitch", 403);
+    }
+
+    if (list.status === "suspended") {
+      throw new AppError("This pitch is suspended by admin. Please contact support center to restore it.", 403);
+    }
+  }
+
+  list.status = requestedStatus;
   await list.save();
 
   return List.findById(list._id).populate("user", "name email role");

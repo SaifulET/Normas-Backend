@@ -234,6 +234,60 @@ export const notifyReportCreated = async (report) => {
   });
 };
 
+export const notifyReportAction = async ({ action, reason = "", report } = {}) => {
+  const list = report?.list && typeof report.list === "object" ? report.list : null;
+  const reporter = getEntityId(report?.user);
+  const owner = getEntityId(list?.user);
+  const reportId = report?._id;
+  const listId = getEntityId(list);
+  const pitchTitle = list?.title || "the reported pitch";
+  const restored = action === "restore";
+  const reasonText = reason ? ` Reason: ${reason}` : "";
+  const notifications = [];
+
+  if (reporter) {
+    notifications.push(
+      ...await notifyUsers([reporter], {
+        type: "report_action",
+        title: restored ? "Reported pitch restored" : "Your report was reviewed",
+        message: restored
+          ? `${pitchTitle} was restored after review.${reasonText}`
+          : `${pitchTitle} was suspended after your report.${reasonText}`,
+        referenceType: "report",
+        referenceId: reportId,
+        metadata: {
+          action,
+          listId,
+          reportId,
+          reason,
+        },
+      })
+    );
+  }
+
+  if (owner) {
+    notifications.push(
+      ...await notifyUsers([owner], {
+        type: restored ? "pitch_restored" : "pitch_suspended",
+        title: restored ? "Your pitch was restored" : "Your pitch was suspended",
+        message: restored
+          ? `${pitchTitle} is visible again after review.${reasonText}`
+          : `${pitchTitle} was suspended by super admin.${reasonText}`,
+        referenceType: "list",
+        referenceId: listId,
+        metadata: {
+          action,
+          listId,
+          reportId,
+          reason,
+        },
+      })
+    );
+  }
+
+  return notifications;
+};
+
 export const getNotifications = async (authUser, query = {}) => {
   if (!authUser?.userId) {
     throw new AppError("Unauthorized", 401);

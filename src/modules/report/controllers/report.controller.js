@@ -56,6 +56,20 @@ export const updateReportStatus = async (req, res, next) => {
   }
 };
 
+export const takeReportAction = async (req, res, next) => {
+  try {
+    const result = await reportService.takeReportAction(req.params.reportId, req.body);
+
+    res.status(200).json({
+      success: true,
+      message: "Report action completed successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const deleteReport = async (req, res, next) => {
   try {
     const result = await reportService.deleteReport(req.params.reportId);

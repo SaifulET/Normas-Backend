@@ -2,7 +2,10 @@ import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../../list/models/list.model.js";
-import { notifyReportCreated } from "../../notification/services/notification.service.js";
+import {
+  notifyReportAction,
+  notifyReportCreated,
+} from "../../notification/services/notification.service.js";
 import Report, { reportStatuses } from "../models/report.model.js";
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -52,7 +55,15 @@ const getReportOrThrow = async (reportId) => {
 const populateReport = (query) =>
   query
     .populate("user", "name email role")
-    .populate("list", "title country stage sector fundingTarget status bannerImage user createdAt updatedAt");
+    .populate({
+      path: "list",
+      populate: {
+        path: "user",
+        select: "name email role",
+      },
+      select:
+        "title country stage sector fundingTarget status bannerImage user description additionalDetails viewCount createdAt updatedAt",
+    });
 
 const normalizeDescription = (description) => {
   if (typeof description !== "string" || !description.trim()) {
@@ -106,6 +117,34 @@ export const updateReportStatus = async (reportId, status) => {
   await report.save();
 
   return populateReport(Report.findById(report._id));
+};
+
+export const takeReportAction = async (reportId, payload = {}) => {
+  const report = await getReportOrThrow(reportId);
+  const action = String(payload.action || "").trim().toLowerCase();
+  const reason = typeof payload.reason === "string" ? payload.reason.trim().slice(0, 250) : "";
+
+  if (!["suspend", "restore"].includes(action)) {
+    throw new AppError("action must be suspend or restore", 400);
+  }
+
+  const list = await getListOrThrow(report.list);
+
+  list.status = action === "suspend" ? "suspended" : "activated";
+  await list.save();
+
+  report.status = "solved";
+  await report.save();
+
+  const populatedReport = await populateReport(Report.findById(report._id));
+
+  await notifyReportAction({
+    action,
+    reason,
+    report: populatedReport,
+  });
+
+  return populatedReport;
 };
 
 export const deleteReport = async (reportId) => {
