@@ -7,6 +7,11 @@ import {
   verifySocketIdentity,
 } from "./modules/support/services/support.service.js";
 import * as investmentConversationService from "./modules/investment-conversations/services/investmentConversation.service.js";
+import {
+  buildNotificationRoomName,
+  getUnreadCount,
+  verifyNotificationSocketIdentity,
+} from "./modules/notification/services/notification.service.js";
 
 const getSocketToken = (socket, payload = {}) =>
   payload.token || socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace("Bearer ", "");
@@ -64,6 +69,32 @@ export const createSocketServer = (httpServer) => {
   });
 
   io.on("connection", (socket) => {
+    socket.on("notification:join", async (payload = {}, callback = () => {}) => {
+      try {
+        const { authUser } = await verifyNotificationSocketIdentity({
+          token: getSocketToken(socket, payload),
+        });
+
+        socket.data.notificationAuthUser = authUser;
+        socket.join(buildNotificationRoomName(authUser.userId));
+
+        const unreadResult = await getUnreadCount(authUser);
+
+        callback({
+          success: true,
+          unreadCount: unreadResult.unreadCount,
+        });
+      } catch (error) {
+        const appError = error instanceof AppError
+          ? error
+          : new AppError("Notification socket join failed", 500);
+        callback({
+          success: false,
+          message: appError.message,
+        });
+      }
+    });
+
     socket.on("investment:join", async (payload = {}, callback = () => {}) => {
       try {
         const { conversationId } = payload;

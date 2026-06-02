@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../../list/models/list.model.js";
+import { notifyReportCreated } from "../../notification/services/notification.service.js";
 import Report, { reportStatuses } from "../models/report.model.js";
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -78,7 +79,10 @@ export const createReport = async (authUser, payload) => {
     status: "pending",
   });
 
-  return populateReport(Report.findById(createdReport._id));
+  const report = await populateReport(Report.findById(createdReport._id));
+  await notifyReportCreated(report);
+
+  return report;
 };
 
 export const getAllReports = async () => {

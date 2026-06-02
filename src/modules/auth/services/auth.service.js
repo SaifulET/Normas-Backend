@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import AppError from "../../../utils/appError.js";
+import { notifyUserRegistered } from "../../notification/services/notification.service.js";
 import User from "../models/user.model.js";
 
 const transporter = nodemailer.createTransport({
@@ -106,6 +107,7 @@ export const signup = async ({ name, role, email, password }) => {
 
   user.refreshToken = refreshToken;
   await user.save();
+  await notifyUserRegistered(user);
 
   return buildAuthResponse(user, accessToken, refreshToken);
 };

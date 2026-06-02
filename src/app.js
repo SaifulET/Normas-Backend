@@ -13,6 +13,7 @@ import supportRoutes from "./modules/support/routes/support.routes.js";
 import investmentConversationRoutes from "./modules/investment-conversations/routes/investmentConversation.routes.js";
 import scheduleRoutes from "./modules/schedule/routes/schedule.routes.js";
 import adminUserRoutes from "./modules/admin-users/routes/adminUser.routes.js";
+import notificationRoutes from "./modules/notification/routes/notification.routes.js";
 import { optionalAuthenticate } from "./middlewares/optionalAuth.middleware.js";
 
 const app = express();
@@ -50,6 +51,7 @@ app.use("/api/v1/support", optionalAuthenticate, supportRoutes);
 app.use("/api/v1/investment-conversations", investmentConversationRoutes);
 app.use("/api/v1/schedules", scheduleRoutes);
 app.use("/api/v1/admin/users", adminUserRoutes);
+app.use("/api/v1/notifications", notificationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

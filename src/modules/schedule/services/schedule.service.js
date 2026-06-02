@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import InvestmentConversation from "../../investment-conversations/models/investmentConversation.model.js";
+import { notifyScheduleCreated } from "../../notification/services/notification.service.js";
 import Schedule from "../models/schedule.model.js";
 
 const allowedRoles = ["investor", "investee", "superadmin"];
@@ -278,6 +279,8 @@ export const createSchedule = async (authUser, payload = {}) => {
   });
 
   const schedule = await getScheduleOrThrow(createdSchedule._id);
+  await notifyScheduleCreated(schedule);
+
   return serializeSchedule(schedule);
 };
 

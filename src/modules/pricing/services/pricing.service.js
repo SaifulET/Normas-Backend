@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Stripe from "stripe";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
+import { notifyPaymentCreated } from "../../notification/services/notification.service.js";
 import Pricing, {
   billingCycles,
   pricingAudienceRoles,
@@ -1015,6 +1016,18 @@ const syncInvoiceRecord = async ({ localSubscription, stripeInvoice, user }) => 
   };
   localSubscription.stripeLatestInvoiceId = invoice.stripeInvoiceId;
   await localSubscription.save();
+
+  if (invoice.status === "paid") {
+    try {
+      await notifyPaymentCreated({
+        invoice,
+        user,
+        subscription: localSubscription,
+      });
+    } catch (error) {
+      console.error("Payment notification failed:", error.message);
+    }
+  }
 
   return invoice;
 };

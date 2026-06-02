@@ -3,6 +3,10 @@ import http from "http";
 import app from "./app.js";
 import connectDB from "./config/db.js";
 import { createSocketServer } from "./socket.js";
+import {
+  setNotificationSocketServer,
+  startScheduleNotificationWorker,
+} from "./modules/notification/services/notification.service.js";
 
 dotenv.config();
 
@@ -27,7 +31,9 @@ const startServer = async () => {
 
   const server = http.createServer(app);
   const io = createSocketServer(server);
+  setNotificationSocketServer(io);
   app.set("io", io);
+  startScheduleNotificationWorker();
 
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
