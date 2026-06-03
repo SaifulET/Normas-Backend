@@ -10,6 +10,8 @@ const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
 const normalizeText = (value) => String(value || "").trim();
 
+const profileProjection = "name email mobile profileImage accountStatus taxPercentage socialLinks role createdAt updatedAt";
+
 const normalizeTaxPercentage = (value) => {
   if (typeof value === "undefined" || value === null || value === "") {
     return undefined;
@@ -105,7 +107,19 @@ const assertAuthenticatedUser = (authUser) => {
 
 export const getSuperadminProfile = async (authUser) => {
   assertSuperadmin(authUser);
-  const user = await getUserOrThrow(authUser.userId);
+
+  if (!isValidObjectId(authUser.userId)) {
+    throw new AppError("Invalid userId", 400);
+  }
+
+  const user = await User.findById(authUser.userId)
+    .select(profileProjection)
+    .lean();
+
+  if (!user) {
+    throw new AppError("User not found", 404);
+  }
+
   return buildProfileResponse(user);
 };
 
