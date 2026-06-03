@@ -3,6 +3,10 @@ import jwt from "jsonwebtoken";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../../list/models/list.model.js";
+import {
+  createChatModerationAlert,
+  moderateChatMessage,
+} from "../../moderation/services/moderation.service.js";
 import InvestmentConversation, {
   investmentConversationStatuses,
 } from "../models/investmentConversation.model.js";
@@ -48,6 +52,27 @@ const validateMessage = (message) => {
   }
 
   return normalizedMessage;
+};
+
+const buildModeratedMessageData = ({ authUser, message, receiverUser, sentAt }) => {
+  const moderation = moderateChatMessage(message);
+  const receiverId = receiverUser?._id || receiverUser || null;
+
+  return {
+    senderUser: authUser.userId,
+    senderRole: authUser.role,
+    message,
+    moderationStatus: moderation.status,
+    moderationReasons: moderation.reasons,
+    moderationHiddenFrom: moderation.restricted && receiverId ? [receiverId] : [],
+    sentAt,
+    seenBy: [
+      {
+        user: authUser.userId,
+        seenAt: sentAt,
+      },
+    ],
+  };
 };
 
 const validateMeetingStatus = (status, allowedStatuses = meetingRequestStatuses) => {
@@ -179,8 +204,36 @@ const assertAllowedRole = (role) => {
 const hasSeenMessage = (message, userId) =>
   message.seenBy.some((entry) => String(entry.user) === String(userId));
 
+const isMessageHiddenFromViewer = (message, authUserOrUserId) => {
+  if (!message || !authUserOrUserId) {
+    return false;
+  }
+
+  const viewerId = typeof authUserOrUserId === "object" ? authUserOrUserId.userId : authUserOrUserId;
+  const viewerRole = typeof authUserOrUserId === "object" ? authUserOrUserId.role : "";
+
+  if (viewerRole === "superadmin") {
+    return false;
+  }
+
+  const senderId = getMessageSenderId(message);
+
+  if (String(senderId) === String(viewerId)) {
+    return false;
+  }
+
+  return (message.moderationHiddenFrom || []).some((userId) => String(userId) === String(viewerId));
+};
+
+const getVisibleMessagesForViewer = (messages = [], authUserOrUserId) =>
+  messages.filter((message) => !isMessageHiddenFromViewer(message, authUserOrUserId));
+
 const countUnreadMessages = (messages = [], userId) =>
   messages.reduce((count, message) => {
+    if (isMessageHiddenFromViewer(message, userId)) {
+      return count;
+    }
+
     if (!message.senderUser || String(message.senderUser._id || message.senderUser) === String(userId)) {
       return count;
     }
@@ -215,6 +268,20 @@ const getConversationOtherUser = (conversation, currentUserId) => {
   }
 
   return conversation.investor;
+};
+
+const getMessageReceiverUser = (conversation, senderUserId) => {
+  const senderId = String(senderUserId);
+
+  if (String(conversation.investor?._id || conversation.investor) === senderId) {
+    return conversation.investee;
+  }
+
+  if (String(conversation.investee?._id || conversation.investee) === senderId) {
+    return conversation.investor;
+  }
+
+  return getConversationOtherUser(conversation, senderId);
 };
 
 const getRelativeTimeLabel = (date) => {
@@ -319,6 +386,9 @@ const serializeMessage = (message) => ({
   senderUser: serializeUser(message.senderUser),
   senderRole: message.senderRole,
   message: message.message,
+  moderationStatus: message.moderationStatus || "approved",
+  moderationReasons: message.moderationReasons || [],
+  isRestricted: message.moderationStatus === "restricted",
   sentAt: message.sentAt,
   seenBy: message.seenBy.map((entry) => ({
     user: typeof entry.user === "object" && entry.user !== null
@@ -341,7 +411,10 @@ const serializeMessageForViewer = (message, currentUserId) => ({
 
 const serializeConversation = (conversation, options = {}) => {
   const currentUserId = options.currentUserId ? String(options.currentUserId) : null;
-  const messages = sortMessagesBySentAt(conversation.messages);
+  const authViewer = options.authUser || (currentUserId ? { userId: currentUserId } : null);
+  const messages = sortMessagesBySentAt(
+    currentUserId ? getVisibleMessagesForViewer(conversation.messages, authViewer) : conversation.messages
+  );
   const lastMessage = messages[messages.length - 1] || null;
 
   return {
@@ -372,7 +445,7 @@ const serializeConversation = (conversation, options = {}) => {
 
 const serializeConversationInboxItem = (conversation, currentUserId) => {
   const viewerId = String(currentUserId);
-  const messages = sortMessagesBySentAt(conversation.messages);
+  const messages = sortMessagesBySentAt(getVisibleMessagesForViewer(conversation.messages, currentUserId));
   const lastMessage = messages[messages.length - 1] || null;
   const lastIncomingMessage = getLastIncomingMessage(messages, viewerId);
   const otherUserInfo = getConversationOtherUser(conversation, viewerId);
@@ -463,6 +536,10 @@ const markMessagesSeen = async (conversation, viewerId, options = {}) => {
   const seenMessageIds = [];
 
   conversation.messages.forEach((message) => {
+    if (isMessageHiddenFromViewer(message, viewerId)) {
+      return;
+    }
+
     if (!message.senderUser || String(message.senderUser._id || message.senderUser) === String(viewerId)) {
       return;
     }
@@ -536,7 +613,7 @@ const getPaginatedMessages = (messages = [], query = {}, currentUserId) => {
   const page = parsePositiveInteger(query.page, 1, "page", 10000);
   const limitPairs = parsePositiveInteger(query.limitPairs, 5, "limitPairs", 50);
   const limitMessages = limitPairs * 2;
-  const sortedMessages = sortMessagesBySentAt(messages);
+  const sortedMessages = sortMessagesBySentAt(getVisibleMessagesForViewer(messages, currentUserId));
   const totalMessages = sortedMessages.length;
   const endIndex = Math.max(totalMessages - (page - 1) * limitMessages, 0);
   const startIndex = Math.max(endIndex - limitMessages, 0);
@@ -631,6 +708,12 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
     String(authUser.userId) === String(investee._id) ||
     authUser.role === "superadmin";
   const initialMessage = canSetInitialMessage ? normalizeOptionalText(payload.initialMessage) : "";
+  const initialReceiver =
+    String(authUser.userId) === String(investor._id)
+      ? investee
+      : String(authUser.userId) === String(investee._id)
+        ? investor
+        : null;
 
   let conversation = await buildBaseConversationQuery().findOne({
     list: list._id,
@@ -643,18 +726,12 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
     const sentAt = new Date();
     const messages = initialMessage
       ? [
-          {
-            senderUser: authUser.userId,
-            senderRole: authUser.role,
+          buildModeratedMessageData({
+            authUser,
             message: validateMessage(initialMessage),
+            receiverUser: initialReceiver,
             sentAt,
-            seenBy: [
-              {
-                user: authUser.userId,
-                seenAt: sentAt,
-              },
-            ],
-          },
+          }),
         ]
       : [];
 
@@ -669,25 +746,42 @@ export const createOrGetConversation = async (authUser, payload = {}) => {
     });
 
     conversation = await getConversationOrThrow(createdConversation._id);
+
+    const savedInitialMessage = conversation.messages[conversation.messages.length - 1];
+    if (savedInitialMessage?.moderationStatus === "restricted") {
+      await createChatModerationAlert({
+        conversation,
+        message: savedInitialMessage,
+        receiver: initialReceiver?._id || initialReceiver,
+        reasons: savedInitialMessage.moderationReasons,
+        sender: authUser.userId,
+      });
+    }
+
     created = true;
   } else if (initialMessage && conversation.messages.length === 0) {
     const sentAt = new Date();
 
-    conversation.messages.push({
-      senderUser: authUser.userId,
-      senderRole: authUser.role,
+    conversation.messages.push(buildModeratedMessageData({
+      authUser,
       message: validateMessage(initialMessage),
+      receiverUser: initialReceiver,
       sentAt,
-      seenBy: [
-        {
-          user: authUser.userId,
-          seenAt: sentAt,
-        },
-      ],
-    });
+    }));
     conversation.lastMessageAt = sentAt;
     await conversation.save();
     conversation = await getConversationOrThrow(conversation._id);
+
+    const savedInitialMessage = conversation.messages[conversation.messages.length - 1];
+    if (savedInitialMessage?.moderationStatus === "restricted") {
+      await createChatModerationAlert({
+        conversation,
+        message: savedInitialMessage,
+        receiver: initialReceiver?._id || initialReceiver,
+        reasons: savedInitialMessage.moderationReasons,
+        sender: authUser.userId,
+      });
+    }
   }
 
   const superadmins = await getSuperadmins();
@@ -792,19 +886,14 @@ export const createConversationMessage = async (authUser, conversationId, payloa
 
   const message = validateMessage(payload.message);
   const sentAt = new Date();
+  const receiverUser = getMessageReceiverUser(conversation, authUser.userId);
 
-  conversation.messages.push({
-    senderUser: authUser.userId,
-    senderRole: authUser.role,
+  conversation.messages.push(buildModeratedMessageData({
+    authUser,
     message,
+    receiverUser,
     sentAt,
-    seenBy: [
-      {
-        user: authUser.userId,
-        seenAt: sentAt,
-      },
-    ],
-  });
+  }));
   conversation.lastMessageAt = sentAt;
   conversation.status = "active";
 
@@ -813,10 +902,20 @@ export const createConversationMessage = async (authUser, conversationId, payloa
   const savedConversation = await getConversationOrThrow(conversation._id);
   const savedMessage = savedConversation.messages[savedConversation.messages.length - 1];
   const superadmins = await getSuperadmins();
-  const receiverUser = getConversationOtherUser(savedConversation, authUser.userId);
-  const receiverUnseenMessageCount = receiverUser
-    ? countUnreadMessages(savedConversation.messages, receiverUser._id)
+  const savedReceiverUser = getMessageReceiverUser(savedConversation, authUser.userId);
+  const receiverUnseenMessageCount = savedReceiverUser
+    ? countUnreadMessages(savedConversation.messages, savedReceiverUser._id)
     : 0;
+
+  if (savedMessage.moderationStatus === "restricted") {
+    await createChatModerationAlert({
+      conversation: savedConversation,
+      message: savedMessage,
+      receiver: savedReceiverUser?._id || savedReceiverUser,
+      reasons: savedMessage.moderationReasons,
+      sender: authUser.userId,
+    });
+  }
 
   return {
     room: buildConversationRoom(conversationId),
@@ -827,7 +926,7 @@ export const createConversationMessage = async (authUser, conversationId, payloa
     }),
     message: serializeMessageForViewer(savedMessage, authUser.userId),
     senderUser: serializeUser(savedMessage.senderUser),
-    receiverUser: serializeUser(receiverUser),
+    receiverUser: serializeUser(savedReceiverUser),
     receiverUnseenMessageCount,
   };
 };
@@ -872,16 +971,18 @@ export const buildMessageEventPayloadForViewer = async (authUser, conversationId
 
   const superadmins = await getSuperadmins();
   const senderId = getMessageSenderId(message);
-  const receiverUser = getConversationOtherUser(conversation, senderId);
+  const receiverUser = getMessageReceiverUser(conversation, senderId);
   const receiverUnseenMessageCount = receiverUser
     ? countUnreadMessages(conversation.messages, receiverUser._id)
     : 0;
+  const viewerCanSeeMessage = !isMessageHiddenFromViewer(message, authUser);
 
   return {
     conversationId: conversation._id,
-    message: serializeMessageForViewer(message, authUser.userId),
+    message: viewerCanSeeMessage ? serializeMessageForViewer(message, authUser.userId) : null,
     conversation: serializeConversation(conversation, {
       currentUserId: authUser.userId,
+      authUser,
       superadmins,
     }),
     senderUser: serializeUser(message.senderUser),

@@ -142,7 +142,7 @@ export const removeInvestorSavedList = async (req, res, next) => {
 
 export const getListById = async (req, res, next) => {
   try {
-    const result = await listService.getListById(req.params.listId);
+    const result = await listService.getListById(req.params.listId, req.user);
 
     res.status(200).json({
       success: true,

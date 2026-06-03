@@ -3,10 +3,14 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import mongoose from "mongoose";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
+import {
+  createPostModerationAlert,
+  moderatePost,
+} from "../../moderation/services/moderation.service.js";
 import List from "../models/list.model.js";
 import SavedList from "../models/savedList.model.js";
 
-const allowedStatuses = ["activated", "deactivated", "suspended"];
+const allowedStatuses = ["activated", "deactivated", "suspended", "under_review"];
 const relatedListLimit = 5;
 const maxDescriptionImageSize = 5 * 1024 * 1024;
 const maxDescriptionImageCount = 10;
@@ -188,13 +192,7 @@ const replaceDescriptionImageSources = async (description, userId) => {
 
 const buildFilteredListsQuery = (query = {}) => {
   const filters = {};
-  const status = normalizeText(query.status || "activated");
-
-  if (!allowedStatuses.includes(status)) {
-    throw new AppError("status must be activated, deactivated, or suspended", 400);
-  }
-
-  filters.status = status;
+  filters.status = "activated";
 
   const search = normalizeText(query.search || query.keyword);
 
@@ -450,10 +448,38 @@ const buildCreatePayload = async (authUser, payload) => {
   };
 };
 
+const applyPostModeration = async (list, authUser) => {
+  if (authUser.role === "superadmin") {
+    return list;
+  }
+
+  const moderationResult = moderatePost(list);
+
+  list.moderationStatus = moderationResult.decision;
+  list.moderationReasons = moderationResult.reasons;
+  list.moderationReviewedBy = null;
+  list.moderationReviewedAt = null;
+
+  if (moderationResult.decision === "suspended") {
+    list.status = "suspended";
+  } else if (moderationResult.decision === "manual_review") {
+    list.status = "under_review";
+  }
+
+  await list.save();
+
+  if (moderationResult.decision !== "approved") {
+    await createPostModerationAlert({ list, moderationResult });
+  }
+
+  return list;
+};
+
 export const createList = async (authUser, payload) => {
   await getUserOrThrow(authUser.userId);
 
   const createdList = await List.create(await buildCreatePayload(authUser, payload));
+  await applyPostModeration(createdList, authUser);
 
   return List.findById(createdList._id).populate("user", "name email role");
 };
@@ -499,12 +525,13 @@ export const updateList = async (authUser, listId, payload) => {
   }
 
   await list.save();
+  await applyPostModeration(list, authUser);
 
   return List.findById(list._id).populate("user", "name email role");
 };
 
 export const getAllLists = async () => {
-  return List.find().populate("user", "name email role").sort({ createdAt: -1 });
+  return List.find({ status: "activated" }).populate("user", "name email role").sort({ createdAt: -1 });
 };
 
 export const getFilteredLists = async (query = {}) => {
@@ -532,16 +559,10 @@ export const getFilteredLists = async (query = {}) => {
 };
 
 export const getSectorListCounts = async (query = {}) => {
-  const status = normalizeText(query.status || "activated");
-
-  if (!allowedStatuses.includes(status)) {
-    throw new AppError("status must be activated, deactivated, or suspended", 400);
-  }
-
   const sectors = await List.aggregate([
     {
       $match: {
-        status,
+        status: "activated",
         sector: {
           $exists: true,
           $ne: "",
@@ -577,8 +598,18 @@ export const getSectorListCounts = async (query = {}) => {
   };
 };
 
-export const getListById = async (listId) => {
+export const getListById = async (listId, authUser = null) => {
   const list = await getListOrThrow(listId);
+
+  if (list.status !== "activated") {
+    const isOwner = authUser?.userId && String(list.user) === String(authUser.userId);
+    const isSuperadmin = authUser?.role === "superadmin";
+
+    if (!isOwner && !isSuperadmin) {
+      throw new AppError("List not found", 404);
+    }
+  }
+
   return populateListQuery(List.findById(list._id));
 };
 
@@ -740,7 +771,7 @@ export const changeListStatus = async (authUser, listId, status) => {
   const requestedStatus = normalizeText(status);
 
   if (!allowedStatuses.includes(requestedStatus)) {
-    throw new AppError("status must be activated, deactivated, or suspended", 400);
+    throw new AppError("status must be activated, deactivated, suspended, or under_review", 400);
   }
 
   if (authUser.role !== "superadmin") {
@@ -748,12 +779,27 @@ export const changeListStatus = async (authUser, listId, status) => {
       throw new AppError("Investees can only activate or deactivate their own pitch", 403);
     }
 
-    if (list.status === "suspended") {
-      throw new AppError("This pitch is suspended by admin. Please contact support center to restore it.", 403);
+    if (["suspended", "under_review"].includes(list.status)) {
+      throw new AppError("This pitch is suspended or under review. Please contact support center to restore it.", 403);
     }
   }
 
   list.status = requestedStatus;
+
+  if (authUser.role === "superadmin") {
+    if (requestedStatus === "activated") {
+      list.moderationStatus = "approved";
+      list.moderationReasons = [];
+    } else if (requestedStatus === "suspended") {
+      list.moderationStatus = "suspended";
+    } else if (requestedStatus === "under_review") {
+      list.moderationStatus = "manual_review";
+    }
+
+    list.moderationReviewedBy = authUser.userId;
+    list.moderationReviewedAt = new Date();
+  }
+
   await list.save();
 
   return List.findById(list._id).populate("user", "name email role");

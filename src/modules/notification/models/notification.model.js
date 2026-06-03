@@ -10,6 +10,8 @@ export const notificationTypes = [
   "report_action",
   "pitch_suspended",
   "pitch_restored",
+  "moderation_alert",
+  "moderation_warning",
 ];
 
 const notificationSchema = new mongoose.Schema(

@@ -68,8 +68,27 @@ const listSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["activated", "deactivated", "suspended"],
+      enum: ["activated", "deactivated", "suspended", "under_review"],
       default: "deactivated",
+    },
+    moderationStatus: {
+      type: String,
+      enum: ["approved", "suspended", "manual_review"],
+      default: "approved",
+      index: true,
+    },
+    moderationReasons: {
+      type: [String],
+      default: [],
+    },
+    moderationReviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    moderationReviewedAt: {
+      type: Date,
+      default: null,
     },
     viewCount: {
       type: Number,

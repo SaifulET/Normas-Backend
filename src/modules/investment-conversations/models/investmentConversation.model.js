@@ -35,6 +35,24 @@ const investmentConversationMessageSchema = new mongoose.Schema(
       trim: true,
       maxlength: 2000,
     },
+    moderationStatus: {
+      type: String,
+      enum: ["approved", "restricted"],
+      default: "approved",
+    },
+    moderationReasons: {
+      type: [String],
+      default: [],
+    },
+    moderationHiddenFrom: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+      ],
+      default: [],
+    },
     sentAt: {
       type: Date,
       default: Date.now,

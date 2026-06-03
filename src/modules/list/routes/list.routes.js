@@ -1,6 +1,7 @@
 import express from "express";
 import * as listController from "../controllers/list.controller.js";
 import { authenticate, authorize } from "../../../middlewares/auth.middleware.js";
+import { optionalAuthenticate } from "../../../middlewares/optionalAuth.middleware.js";
 import { handleListImageUpload } from "../../../middlewares/listUpload.middleware.js";
 
 const router = express.Router();
@@ -14,7 +15,7 @@ router.get("/saved/me", authenticate, authorize("investor"), listController.getM
 router.get("/saved/:listId/status", authenticate, authorize("investor"), listController.getInvestorSavedListStatus);
 router.post("/save", authenticate, authorize("investor"), listController.saveInvestorList);
 router.delete("/saved/:listId", authenticate, authorize("investor"), listController.removeInvestorSavedList);
-router.get("/:listId", listController.getListById);
+router.get("/:listId", optionalAuthenticate, listController.getListById);
 router.patch("/:listId/views", express.json(), listController.updateListViewCount);
 
 router.use(authenticate);
