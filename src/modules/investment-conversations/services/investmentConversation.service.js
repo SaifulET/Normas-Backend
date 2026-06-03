@@ -55,6 +55,24 @@ const validateMessage = (message) => {
 };
 
 const buildModeratedMessageData = ({ authUser, message, receiverUser, sentAt }) => {
+  if (authUser.role === "superadmin") {
+    return {
+      senderUser: authUser.userId,
+      senderRole: authUser.role,
+      message,
+      moderationStatus: "approved",
+      moderationReasons: [],
+      moderationHiddenFrom: [],
+      sentAt,
+      seenBy: [
+        {
+          user: authUser.userId,
+          seenAt: sentAt,
+        },
+      ],
+    };
+  }
+
   const moderation = moderateChatMessage(message);
   const receiverId = receiverUser?._id || receiverUser || null;
 
