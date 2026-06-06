@@ -7,10 +7,25 @@ import {
   createPostModerationAlert,
   moderatePost,
 } from "../../moderation/services/moderation.service.js";
+import {
+  notifySuperadmins,
+  notifyUsers,
+} from "../../notification/services/notification.service.js";
 import List from "../models/list.model.js";
 import SavedList from "../models/savedList.model.js";
 
-const allowedStatuses = ["activated", "deactivated", "suspended", "under_review"];
+const allowedStatuses = ["pending", "activated", "deactivated", "suspended", "under_review"];
+const editableContentFields = [
+  "bannerImage",
+  "title",
+  "country",
+  "stage",
+  "sector",
+  "fundingTarget",
+  "keyword",
+  "description",
+  "additionalDetails",
+];
 const relatedListLimit = 5;
 const maxDescriptionImageSize = 5 * 1024 * 1024;
 const maxDescriptionImageCount = 10;
@@ -66,6 +81,67 @@ const parseOptionalNumber = (value, fieldName) => {
 };
 
 const firstDefined = (...values) => values.find((value) => typeof value !== "undefined");
+
+const getEntityId = (entity) => entity?._id || entity;
+
+const toPlainObject = (document) => {
+  if (!document) {
+    return document;
+  }
+
+  return typeof document.toObject === "function"
+    ? document.toObject()
+    : { ...document };
+};
+
+const canViewPendingDraft = (list, authUser = null) => {
+  if (!authUser || !list?.pendingDraft) {
+    return false;
+  }
+
+  const ownerId = getEntityId(list.user)?.toString();
+  return authUser.role === "superadmin" || ownerId === authUser.userId;
+};
+
+export const serializeListForViewer = (list, authUser = null) => {
+  const plainList = toPlainObject(list);
+
+  if (!plainList) {
+    return plainList;
+  }
+
+  const pendingDraft = plainList.pendingDraft || null;
+  const serializedList = {
+    ...plainList,
+  };
+
+  if (!canViewPendingDraft(plainList, authUser)) {
+    delete serializedList.pendingDraft;
+    delete serializedList.hasPendingDraft;
+    return serializedList;
+  }
+
+  const publishedContent = editableContentFields.reduce((content, field) => {
+    content[field] = plainList[field];
+    return content;
+  }, {});
+
+  for (const field of editableContentFields) {
+    if (typeof pendingDraft[field] !== "undefined") {
+      serializedList[field] = pendingDraft[field];
+    }
+  }
+
+  return {
+    ...serializedList,
+    hasPendingDraft: Boolean(pendingDraft),
+    pendingDraft,
+    publishedContent,
+  };
+};
+
+const serializeListCollectionForViewer = (lists, authUser = null) =>
+  lists.map((list) => serializeListForViewer(list, authUser));
 
 const getAwsConfig = () => {
   const region = process.env.AWS_REGION?.trim();
@@ -284,6 +360,107 @@ const normalizeFundingTarget = (value) => {
   return normalizedValue;
 };
 
+const buildContentPayload = async (authUser, payload, fallback = {}) => {
+  const fundingTarget = normalizeFundingTarget(payload.fundingTarget);
+  const userId = getEntityId(fallback.user) || authUser.userId;
+  const source = fallback.pendingDraft || fallback;
+  const rawDescription = typeof payload.description === "undefined"
+    ? source.description
+    : payload.description;
+
+  return {
+    bannerImage: typeof payload.bannerImage === "string"
+      ? payload.bannerImage
+      : source.bannerImage || null,
+    title: firstDefined(payload.title, source.title, ""),
+    country: firstDefined(payload.country, source.country, ""),
+    stage: firstDefined(payload.stage, source.stage, ""),
+    sector: firstDefined(payload.sector, source.sector, ""),
+    fundingTarget: typeof fundingTarget === "undefined"
+      ? Number(source.fundingTarget) || 0
+      : fundingTarget,
+    keyword: firstDefined(payload.keyword, source.keyword, ""),
+    description: await replaceDescriptionImageSources(rawDescription, userId),
+    additionalDetails: typeof payload.additionalDetails === "undefined"
+      ? normalizeAdditionalDetails(source.additionalDetails || [])
+      : normalizeAdditionalDetails(payload.additionalDetails),
+  };
+};
+
+const applyContentPayload = (list, content) => {
+  for (const field of editableContentFields) {
+    list[field] = content[field];
+  }
+};
+
+const buildPendingDraft = (authUser, content) => ({
+  ...content,
+  submittedAt: new Date(),
+  submittedBy: authUser.userId,
+});
+
+const getPendingActionLabel = (approvalStatus) =>
+  approvalStatus === "pending_update" ? "updated" : "created";
+
+const isCreateReviewStatus = (approvalStatus) =>
+  ["pending_create", "rejected_create"].includes(approvalStatus);
+
+const isUpdateReviewStatus = (approvalStatus) =>
+  ["pending_update", "rejected_update"].includes(approvalStatus);
+
+const notifyListSubmittedForReview = async (list, action) => {
+  const title = list.pendingDraft?.title || list.title || "Untitled pitch";
+
+  await notifySuperadmins({
+    type: "pitch_submitted",
+    title: action === "updated" ? "Pitch update awaiting approval" : "New pitch awaiting approval",
+    message: `${title} was ${action} by an investee and is waiting for superadmin activation.`,
+    referenceType: "list",
+    referenceId: list._id,
+    metadata: {
+      action,
+      listId: list._id,
+      ownerId: getEntityId(list.user),
+      approvalStatus: list.approvalStatus,
+    },
+  });
+};
+
+const notifyListActivated = async (list) => {
+  await notifyUsers([getEntityId(list.user)], {
+    type: "pitch_approved",
+    title: "Pitch activated",
+    message: `${list.title || "Your pitch"} has been activated by superadmin.`,
+    referenceType: "list",
+    referenceId: list._id,
+    metadata: {
+      action: "activated",
+      listId: list._id,
+      approvalStatus: list.approvalStatus,
+    },
+  });
+};
+
+const notifyListRejected = async (list, rejectedApprovalStatus) => {
+  const title = list.pendingDraft?.title || list.title || "Your pitch";
+  const isUpdate = rejectedApprovalStatus === "rejected_update";
+
+  await notifyUsers([getEntityId(list.user)], {
+    type: "pitch_rejected",
+    title: isUpdate ? "Pitch update was not approved" : "Pitch was not approved",
+    message: isUpdate
+      ? `${title} was reviewed by superadmin. The update was not published, so the previous approved version remains live.`
+      : `${title} was reviewed by superadmin and was not approved for publication.`,
+    referenceType: "list",
+    referenceId: list._id,
+    metadata: {
+      action: "rejected",
+      listId: list._id,
+      approvalStatus: rejectedApprovalStatus,
+    },
+  });
+};
+
 const getUserOrThrow = async (userId) => {
   if (!isValidObjectId(userId)) {
     throw new AppError("Invalid userId", 400);
@@ -425,26 +602,20 @@ const appendRandomRelatedLists = async ({ results, excludedIds, limit }) => {
 };
 
 const buildCreatePayload = async (authUser, payload) => {
-  const fundingTarget = normalizeFundingTarget(payload.fundingTarget);
-  const description = await replaceDescriptionImageSources(payload.description, authUser.userId);
+  const content = await buildContentPayload(authUser, payload);
   const requestedStatus = normalizeText(payload.status);
   const defaultStatus = "deactivated";
   const status = authUser.role === "superadmin"
     ? allowedStatuses.includes(requestedStatus) ? requestedStatus : defaultStatus
-    : ["activated", "deactivated"].includes(requestedStatus) ? requestedStatus : defaultStatus;
+    : "pending";
 
   return {
     user: authUser.userId,
-    bannerImage: payload.bannerImage || null,
-    title: payload.title || "",
-    country: payload.country || "",
-    stage: payload.stage || "",
-    sector: payload.sector || "",
-    fundingTarget: typeof fundingTarget === "undefined" ? 0 : fundingTarget,
-    keyword: payload.keyword || "",
-    description,
-    additionalDetails: normalizeAdditionalDetails(payload.additionalDetails || []),
+    ...content,
     status,
+    approvalStatus: authUser.role === "superadmin" ? "approved" : "pending_create",
+    moderationStatus: authUser.role === "superadmin" ? "approved" : "manual_review",
+    pendingDraft: authUser.role === "superadmin" ? null : buildPendingDraft(authUser, content),
   };
 };
 
@@ -479,59 +650,55 @@ export const createList = async (authUser, payload) => {
   await getUserOrThrow(authUser.userId);
 
   const createdList = await List.create(await buildCreatePayload(authUser, payload));
-  await applyPostModeration(createdList, authUser);
+  if (authUser.role === "superadmin") {
+    await applyPostModeration(createdList, authUser);
+  } else {
+    await notifyListSubmittedForReview(createdList, "created");
+  }
 
-  return List.findById(createdList._id).populate("user", "name email role");
+  const list = await List.findById(createdList._id).populate("user", "name email role");
+  return serializeListForViewer(list, authUser);
 };
 
 export const updateList = async (authUser, listId, payload) => {
   const list = await getListOrThrow(listId);
   assertOwnerOrSuperadmin(authUser, list);
 
-  if (typeof payload.bannerImage === "string") {
-    list.bannerImage = payload.bannerImage;
+  const content = await buildContentPayload(authUser, payload, list);
+
+  if (authUser.role === "superadmin") {
+    applyContentPayload(list, content);
+    list.pendingDraft = null;
+    list.approvalStatus = "approved";
+    await list.save();
+    await applyPostModeration(list, authUser);
+  } else {
+    const isPendingCreate = isCreateReviewStatus(list.approvalStatus) || list.status === "pending";
+
+    if (isPendingCreate) {
+      applyContentPayload(list, content);
+      list.status = "pending";
+      list.approvalStatus = "pending_create";
+    } else {
+      list.approvalStatus = "pending_update";
+    }
+
+    list.pendingDraft = buildPendingDraft(authUser, content);
+    list.moderationStatus = "manual_review";
+    list.moderationReasons = [];
+    list.moderationReviewedBy = null;
+    list.moderationReviewedAt = null;
+    await list.save();
+    await notifyListSubmittedForReview(list, getPendingActionLabel(list.approvalStatus));
   }
 
-  if (typeof payload.title !== "undefined") {
-    list.title = payload.title;
-  }
-
-  if (typeof payload.country !== "undefined") {
-    list.country = payload.country;
-  }
-
-  if (typeof payload.stage !== "undefined") {
-    list.stage = payload.stage;
-  }
-
-  if (typeof payload.sector !== "undefined") {
-    list.sector = payload.sector;
-  }
-
-  if (typeof payload.keyword !== "undefined") {
-    list.keyword = payload.keyword;
-  }
-
-  if (typeof payload.description !== "undefined") {
-    list.description = await replaceDescriptionImageSources(payload.description, list.user);
-  }
-
-  if (typeof payload.fundingTarget !== "undefined") {
-    list.fundingTarget = normalizeFundingTarget(payload.fundingTarget);
-  }
-
-  if (typeof payload.additionalDetails !== "undefined") {
-    list.additionalDetails = normalizeAdditionalDetails(payload.additionalDetails);
-  }
-
-  await list.save();
-  await applyPostModeration(list, authUser);
-
-  return List.findById(list._id).populate("user", "name email role");
+  const updatedList = await List.findById(list._id).populate("user", "name email role");
+  return serializeListForViewer(updatedList, authUser);
 };
 
 export const getAllLists = async () => {
-  return List.find({ status: "activated" }).populate("user", "name email role").sort({ createdAt: -1 });
+  const lists = await List.find({ status: "activated" }).populate("user", "name email role").sort({ createdAt: -1 });
+  return serializeListCollectionForViewer(lists);
 };
 
 export const getFilteredLists = async (query = {}) => {
@@ -548,7 +715,7 @@ export const getFilteredLists = async (query = {}) => {
   ]);
 
   return {
-    lists,
+    lists: serializeListCollectionForViewer(lists),
     pagination: {
       page,
       limit,
@@ -610,7 +777,8 @@ export const getListById = async (listId, authUser = null) => {
     }
   }
 
-  return populateListQuery(List.findById(list._id));
+  const populatedList = await populateListQuery(List.findById(list._id));
+  return serializeListForViewer(populatedList, authUser);
 };
 
 export const getRelatedLists = async (listId) => {
@@ -663,15 +831,140 @@ export const getRelatedLists = async (listId) => {
     limit: relatedListLimit,
   });
 
-  return results;
+  return serializeListCollectionForViewer(results);
+};
+
+const ensureSuperadmin = (authUser) => {
+  if (!authUser?.userId) {
+    throw new AppError("Unauthorized", 401);
+  }
+
+  if (authUser.role !== "superadmin") {
+    throw new AppError("Forbidden: only superadmin can review lists", 403);
+  }
+};
+
+const buildAiReview = (list) => {
+  const result = moderatePost(list);
+  const reasons = result.reasons || [];
+  const isNotRelevant = reasons.some((reason) =>
+    /not clearly related|does not match|spam|random content/i.test(reason)
+  );
+  const isRelevant = result.decision === "approved" || !isNotRelevant;
+  const label = isRelevant
+    ? result.decision === "approved"
+      ? "Relevant"
+      : "Relevant, needs policy review"
+    : "Not relevant";
+
+  return {
+    decision: result.decision,
+    isRelevant,
+    label,
+    reasons,
+    summary: isRelevant
+      ? "AI found this pitch generally relevant to startup, funding, or business activity."
+      : "AI found signals that this pitch may not be relevant for the investment marketplace.",
+  };
+};
+
+const serializeListReview = (list) => {
+  const serializedList = serializeListForViewer(list, { role: "superadmin" });
+
+  return {
+    ...serializedList,
+    aiReview: buildAiReview(serializedList),
+  };
+};
+
+const buildAdminListFilters = (query = {}) => {
+  const filters = {};
+  const status = normalizeText(query.status);
+  const approvalStatus = normalizeText(query.approvalStatus);
+  const search = normalizeText(query.search || query.keyword);
+
+  if (status) {
+    if (!allowedStatuses.includes(status)) {
+      throw new AppError("status must be pending, activated, deactivated, suspended, or under_review", 400);
+    }
+
+    filters.status = status;
+  }
+
+  if (approvalStatus) {
+    if (!["pending_create", "pending_update", "approved", "rejected_create", "rejected_update"].includes(approvalStatus)) {
+      throw new AppError("approvalStatus must be pending_create, pending_update, approved, rejected_create, or rejected_update", 400);
+    }
+
+    filters.approvalStatus = approvalStatus;
+  }
+
+  if (search) {
+    const searchRegex = new RegExp(escapeRegex(search), "i");
+
+    filters.$or = [
+      { title: searchRegex },
+      { keyword: searchRegex },
+      { description: searchRegex },
+      { "pendingDraft.title": searchRegex },
+      { "pendingDraft.keyword": searchRegex },
+      { "pendingDraft.description": searchRegex },
+    ];
+  }
+
+  return filters;
+};
+
+export const getAdminReviewLists = async (authUser, query = {}) => {
+  ensureSuperadmin(authUser);
+
+  const filters = buildAdminListFilters(query);
+  const { page, limit } = parsePagination(query);
+  const skip = (page - 1) * limit;
+
+  const [lists, total, pendingCount] = await Promise.all([
+    populateListQuery(
+      List.find(filters)
+        .sort({ approvalStatus: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+    ),
+    List.countDocuments(filters),
+    List.countDocuments({
+      $or: [
+        { status: "pending" },
+        { approvalStatus: { $in: ["pending_create", "pending_update"] } },
+      ],
+    }),
+  ]);
+
+  return {
+    lists: lists.map(serializeListReview),
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+    pendingCount,
+  };
+};
+
+export const getAdminReviewListById = async (authUser, listId) => {
+  ensureSuperadmin(authUser);
+
+  const list = await populateListQuery(List.findById((await getListOrThrow(listId))._id));
+  return serializeListReview(list);
 };
 
 export const getMyLists = async (authUser) => {
   await getUserOrThrow(authUser.userId);
 
-  return List.find({ user: authUser.userId })
+  const lists = await List.find({ user: authUser.userId })
     .populate("user", "name email role")
     .sort({ createdAt: -1 });
+
+  return serializeListCollectionForViewer(lists, authUser);
 };
 
 export const saveInvestorList = async (authUser, payload = {}) => {
@@ -709,7 +1002,13 @@ export const getMySavedLists = async (authUser) => {
     SavedList.find({ investor: authUser.userId }).sort({ createdAt: -1 })
   );
 
-  return savedLists.filter((savedList) => savedList.list?.status === "activated");
+  return savedLists
+    .filter((savedList) => savedList.list?.status === "activated")
+    .map((savedList) => {
+      const serializedSavedList = toPlainObject(savedList);
+      serializedSavedList.list = serializeListForViewer(savedList.list);
+      return serializedSavedList;
+    });
 };
 
 export const getInvestorSavedListStatus = async (authUser, listId) => {
@@ -762,7 +1061,8 @@ export const updateListViewCount = async (listId, payload) => {
   list.viewCount += incrementBy;
   await list.save();
 
-  return List.findById(list._id).populate("user", "name email role");
+  const updatedList = await List.findById(list._id).populate("user", "name email role");
+  return serializeListForViewer(updatedList);
 };
 
 export const changeListStatus = async (authUser, listId, status) => {
@@ -770,13 +1070,50 @@ export const changeListStatus = async (authUser, listId, status) => {
   assertOwnerOrSuperadmin(authUser, list);
   const requestedStatus = normalizeText(status);
 
+  if (requestedStatus === "rejected") {
+    if (authUser.role !== "superadmin") {
+      throw new AppError("Forbidden: only superadmin can reject submitted pitch changes", 403);
+    }
+
+    if (!list.pendingDraft || !["pending_create", "pending_update"].includes(list.approvalStatus)) {
+      throw new AppError("This pitch does not have a pending submission to reject", 400);
+    }
+
+    const rejectedApprovalStatus = list.approvalStatus === "pending_update"
+      ? "rejected_update"
+      : "rejected_create";
+
+    list.approvalStatus = rejectedApprovalStatus;
+
+    if (rejectedApprovalStatus === "rejected_create") {
+      list.status = "deactivated";
+    }
+
+    if (rejectedApprovalStatus === "rejected_update" && list.moderationStatus === "manual_review") {
+      list.moderationStatus = "approved";
+      list.moderationReasons = [];
+    }
+
+    list.moderationReviewedBy = authUser.userId;
+    list.moderationReviewedAt = new Date();
+    await list.save();
+    await notifyListRejected(list, rejectedApprovalStatus);
+
+    const updatedList = await List.findById(list._id).populate("user", "name email role");
+    return serializeListForViewer(updatedList, authUser);
+  }
+
   if (!allowedStatuses.includes(requestedStatus)) {
-    throw new AppError("status must be activated, deactivated, suspended, or under_review", 400);
+    throw new AppError("status must be pending, activated, deactivated, suspended, or under_review", 400);
   }
 
   if (authUser.role !== "superadmin") {
     if (!["activated", "deactivated"].includes(requestedStatus)) {
       throw new AppError("Investees can only activate or deactivate their own pitch", 403);
+    }
+
+    if (list.approvalStatus === "pending_create" || list.status === "pending") {
+      throw new AppError("This pitch must be activated by superadmin before you can manage its public status.", 403);
     }
 
     if (["suspended", "under_review"].includes(list.status)) {
@@ -788,6 +1125,12 @@ export const changeListStatus = async (authUser, listId, status) => {
 
   if (authUser.role === "superadmin") {
     if (requestedStatus === "activated") {
+      if (list.pendingDraft) {
+        applyContentPayload(list, list.pendingDraft);
+        list.pendingDraft = null;
+      }
+
+      list.approvalStatus = "approved";
       list.moderationStatus = "approved";
       list.moderationReasons = [];
     } else if (requestedStatus === "suspended") {
@@ -802,7 +1145,12 @@ export const changeListStatus = async (authUser, listId, status) => {
 
   await list.save();
 
-  return List.findById(list._id).populate("user", "name email role");
+  if (authUser.role === "superadmin" && requestedStatus === "activated") {
+    await notifyListActivated(list);
+  }
+
+  const updatedList = await List.findById(list._id).populate("user", "name email role");
+  return serializeListForViewer(updatedList, authUser);
 };
 
 export const deleteList = async (authUser, listId) => {

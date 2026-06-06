@@ -3,6 +3,7 @@ import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import Kyc from "../../kyc/models/kyc.model.js";
 import List from "../../list/models/list.model.js";
+import { serializeListForViewer } from "../../list/services/list.service.js";
 
 const userRoles = ["investor", "investee"];
 const accountStatuses = ["active", "inactive", "pending"];
@@ -178,7 +179,10 @@ const getUserPitches = (userId) =>
   List.find({ user: userId })
     .populate("user", "name email role profileImage accountStatus")
     .sort({ createdAt: -1 })
-    .lean();
+    .lean()
+    .then((pitches) =>
+      pitches.map((pitch) => serializeListForViewer(pitch, { role: "superadmin" }))
+    );
 
 export const getAdminUsers = async (query = {}) => {
   const filters = buildUsersQuery(query);

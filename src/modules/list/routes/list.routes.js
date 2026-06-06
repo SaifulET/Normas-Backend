@@ -10,6 +10,8 @@ router.get("/", listController.getAllLists);
 router.get("/filter", listController.getFilteredLists);
 router.get("/sectors", listController.getSectorListCounts);
 router.get("/related/:id", listController.getRelatedLists);
+router.get("/admin/review", authenticate, authorize("superadmin"), listController.getAdminReviewLists);
+router.get("/admin/review/:listId", authenticate, authorize("superadmin"), listController.getAdminReviewListById);
 router.get("/user/me", authenticate, authorize("investor", "investee", "superadmin"), listController.getMyLists);
 router.get("/saved/me", authenticate, authorize("investor"), listController.getMySavedLists);
 router.get("/saved/:listId/status", authenticate, authorize("investor"), listController.getInvestorSavedListStatus);

@@ -70,6 +70,34 @@ export const getSectorListCounts = async (req, res, next) => {
   }
 };
 
+export const getAdminReviewLists = async (req, res, next) => {
+  try {
+    const result = await listService.getAdminReviewLists(req.user, req.query);
+
+    res.status(200).json({
+      success: true,
+      message: "Review lists fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getAdminReviewListById = async (req, res, next) => {
+  try {
+    const result = await listService.getAdminReviewListById(req.user, req.params.listId);
+
+    res.status(200).json({
+      success: true,
+      message: "Review list fetched successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getMyLists = async (req, res, next) => {
   try {
     const result = await listService.getMyLists(req.user);

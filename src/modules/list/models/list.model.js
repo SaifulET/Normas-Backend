@@ -16,6 +16,64 @@ const additionalDetailSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const listContentSchema = new mongoose.Schema(
+  {
+    bannerImage: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    title: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    country: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    stage: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    sector: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    fundingTarget: {
+      type: Number,
+      default: 0,
+    },
+    keyword: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    additionalDetails: {
+      type: [additionalDetailSchema],
+      default: [],
+    },
+    submittedAt: {
+      type: Date,
+      default: null,
+    },
+    submittedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const listSchema = new mongoose.Schema(
   {
     user: {
@@ -68,8 +126,19 @@ const listSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["activated", "deactivated", "suspended", "under_review"],
-      default: "deactivated",
+      enum: ["pending", "activated", "deactivated", "suspended", "under_review"],
+      default: "pending",
+      index: true,
+    },
+    approvalStatus: {
+      type: String,
+      enum: ["pending_create", "pending_update", "approved", "rejected_create", "rejected_update"],
+      default: "approved",
+      index: true,
+    },
+    pendingDraft: {
+      type: listContentSchema,
+      default: null,
     },
     moderationStatus: {
       type: String,
