@@ -1,0 +1,9 @@
+.git
+node_modules
+npm-debug.log*
+.backend-dev.err.log
+.backend-dev.out.log
+.env
+.env.*
+Dockerfile
+docs
