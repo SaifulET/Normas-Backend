@@ -10,7 +10,33 @@ import {
 
 dotenv.config();
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
+
+const getStartupErrorMessage = (error) => {
+  if (error?.code === "EADDRINUSE") {
+    return `Port ${PORT} is already in use. Stop the existing server on that port, or set PORT to a different value in .env.`;
+  }
+
+  return error?.message || "Unknown startup error";
+};
+
+const listen = (server) =>
+  new Promise((resolve, reject) => {
+    const handleError = (error) => {
+      server.off("listening", handleListening);
+      reject(error);
+    };
+
+    const handleListening = () => {
+      server.off("error", handleError);
+      console.log(`Server running on port ${PORT}`);
+      resolve();
+    };
+
+    server.once("error", handleError);
+    server.once("listening", handleListening);
+    server.listen(PORT);
+  });
 
 const handleRequest = async (req, res) => {
   try {
@@ -33,16 +59,14 @@ const startServer = async () => {
   const io = createSocketServer(server);
   setNotificationSocketServer(io);
   app.set("io", io);
-  startScheduleNotificationWorker();
 
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  await listen(server);
+  startScheduleNotificationWorker();
 };
 
 if (!process.env.VERCEL) {
   startServer().catch((error) => {
-    console.error("Failed to start server:", error.message);
+    console.error("Failed to start server:", getStartupErrorMessage(error));
     process.exit(1);
   });
 }

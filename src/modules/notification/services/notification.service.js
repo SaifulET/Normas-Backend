@@ -19,6 +19,68 @@ const normalizeLimit = (value) => Math.min(Math.max(Number(value) || 20, 1), 100
 
 const getEntityId = (entity) => entity?._id || entity;
 
+const getDedupeGroupExpression = () => ({
+  $cond: [
+    {
+      $or: [
+        { $eq: ["$dedupeKey", null] },
+        { $eq: ["$dedupeKey", ""] },
+      ],
+    },
+    { $toString: "$_id" },
+    "$dedupeKey",
+  ],
+});
+
+const buildNotificationGroupPipeline = (baseFilter, status) => {
+  const pipeline = [
+    { $match: baseFilter },
+    {
+      $addFields: {
+        __dedupeGroup: getDedupeGroupExpression(),
+        __isUnread: { $eq: ["$readAt", null] },
+      },
+    },
+    { $sort: { __isUnread: -1, createdAt: -1 } },
+    {
+      $group: {
+        _id: "$__dedupeGroup",
+        hasUnread: { $max: { $cond: ["$__isUnread", 1, 0] } },
+        notification: { $first: "$$ROOT" },
+      },
+    },
+  ];
+
+  if (status === "unread") {
+    pipeline.push({ $match: { hasUnread: 1 } });
+  }
+
+  if (status === "read") {
+    pipeline.push({ $match: { hasUnread: 0 } });
+  }
+
+  return pipeline;
+};
+
+const countGroupedNotifications = async (baseFilter, status) => {
+  const [result] = await Notification.aggregate([
+    ...buildNotificationGroupPipeline(baseFilter, status),
+    { $count: "total" },
+  ]);
+
+  return result?.total || 0;
+};
+
+const getGroupedNotifications = async (baseFilter, status, skip, limit) =>
+  Notification.aggregate([
+    ...buildNotificationGroupPipeline(baseFilter, status),
+    { $replaceRoot: { newRoot: "$notification" } },
+    { $sort: { createdAt: -1 } },
+    { $skip: skip },
+    { $limit: limit },
+    { $project: { __dedupeGroup: 0, __isUnread: 0 } },
+  ]);
+
 export const buildNotificationRoomName = (userId) => `${notificationRoomPrefix}${userId}`;
 
 export const setNotificationSocketServer = (io) => {
@@ -62,6 +124,14 @@ const createNotification = async ({
 }) => {
   if (!recipient || !type || !title || !message) {
     throw new AppError("recipient, type, title and message are required", 400);
+  }
+
+  if (dedupeKey) {
+    const existingNotification = await Notification.findOne({ dedupeKey });
+
+    if (existingNotification) {
+      return existingNotification;
+    }
   }
 
   try {
@@ -293,24 +363,30 @@ export const getNotifications = async (authUser, query = {}) => {
     throw new AppError("Unauthorized", 401);
   }
 
-  const filter = { recipient: authUser.userId };
-
-  if (query.unread === "true") {
-    filter.readAt = null;
-  }
+  const recipient = isValidObjectId(authUser.userId)
+    ? new mongoose.Types.ObjectId(authUser.userId)
+    : authUser.userId;
+  const baseFilter = { recipient };
+  const status = query.unread === "true"
+    ? "unread"
+    : query.read === "true"
+      ? "read"
+      : "";
 
   if (query.type) {
-    filter.type = query.type;
+    baseFilter.type = query.type;
   }
 
   const limit = normalizeLimit(query.limit);
   const page = Math.max(Number(query.page) || 1, 1);
   const skip = (page - 1) * limit;
 
-  const [notifications, total, unreadCount] = await Promise.all([
-    Notification.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
-    Notification.countDocuments(filter),
-    Notification.countDocuments({ recipient: authUser.userId, readAt: null }),
+  const [notifications, total, unreadCount, readCount, totalCount] = await Promise.all([
+    getGroupedNotifications(baseFilter, status, skip, limit),
+    countGroupedNotifications(baseFilter, status),
+    countGroupedNotifications(baseFilter, "unread"),
+    countGroupedNotifications(baseFilter, "read"),
+    countGroupedNotifications(baseFilter, ""),
   ]);
 
   return {
@@ -322,6 +398,8 @@ export const getNotifications = async (authUser, query = {}) => {
       totalPages: Math.ceil(total / limit) || 1,
     },
     unreadCount,
+    readCount,
+    totalCount,
   };
 };
 
@@ -330,10 +408,10 @@ export const getUnreadCount = async (authUser) => {
     throw new AppError("Unauthorized", 401);
   }
 
-  const unreadCount = await Notification.countDocuments({
-    recipient: authUser.userId,
-    readAt: null,
-  });
+  const recipient = isValidObjectId(authUser.userId)
+    ? new mongoose.Types.ObjectId(authUser.userId)
+    : authUser.userId;
+  const unreadCount = await countGroupedNotifications({ recipient }, "unread");
 
   return { unreadCount };
 };
@@ -357,8 +435,19 @@ export const markNotificationAsRead = async (authUser, notificationId) => {
   }
 
   if (!notification.readAt) {
-    notification.readAt = new Date();
-    await notification.save();
+    const readAt = new Date();
+
+    if (notification.dedupeKey) {
+      await Notification.updateMany(
+        { recipient: authUser.userId, dedupeKey: notification.dedupeKey, readAt: null },
+        { $set: { readAt } }
+      );
+    } else {
+      notification.readAt = readAt;
+      await notification.save();
+    }
+
+    notification.readAt = readAt;
   }
 
   return serializeNotification(notification);

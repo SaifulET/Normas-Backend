@@ -10,6 +10,8 @@ export const getNotifications = async (req, res, next) => {
       data: result.data,
       pagination: result.pagination,
       unreadCount: result.unreadCount,
+      readCount: result.readCount,
+      totalCount: result.totalCount,
     });
   } catch (error) {
     next(error);

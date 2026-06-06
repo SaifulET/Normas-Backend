@@ -64,7 +64,6 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: undefined,
-      index: true,
     },
   },
   {
