@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
 
 export const pricingPlanTypes = [
+  "investor_basic",
+  "investor_pro",
+  "investee",
   "investor-basic",
   "investor-pro",
   "investee-basic",

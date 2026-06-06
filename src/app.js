@@ -8,6 +8,8 @@ import legalContentRoutes from "./modules/legal-content/routes/legalContent.rout
 import faqRoutes from "./modules/faq/routes/faq.routes.js";
 import pricingRoutes from "./modules/pricing/routes/pricing.routes.js";
 import * as pricingController from "./modules/pricing/controllers/pricing.controller.js";
+import subscriptionPaymentRoutes from "./modules/payment/subscription/routes/subscription.routes.js";
+import * as subscriptionPaymentController from "./modules/payment/subscription/controllers/subscription.controller.js";
 import reportRoutes from "./modules/report/routes/report.routes.js";
 import supportRoutes from "./modules/support/routes/support.routes.js";
 import investmentConversationRoutes from "./modules/investment-conversations/routes/investmentConversation.routes.js";
@@ -32,6 +34,11 @@ app.post(
   express.raw({ type: "application/json" }),
   pricingController.handleStripeWebhook
 );
+app.post(
+  "/api/v1/payment/subscription/webhook",
+  express.raw({ type: "application/json" }),
+  subscriptionPaymentController.handleStripeWebhook
+);
 app.use(express.json({ limit: "20mb" }));
 
 app.get("/", (_req, res) => {
@@ -47,6 +54,7 @@ app.use("/api/v1/lists", listRoutes);
 app.use("/api/v1/legal-contents", legalContentRoutes);
 app.use("/api/v1/faqs", faqRoutes);
 app.use("/api/v1/pricing", pricingRoutes);
+app.use("/api/v1/payment/subscription", subscriptionPaymentRoutes);
 app.use("/api/v1/reports", reportRoutes);
 app.use("/api/v1/support", optionalAuthenticate, supportRoutes);
 app.use("/api/v1/investment-conversations", investmentConversationRoutes);
