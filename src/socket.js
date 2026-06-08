@@ -61,9 +61,15 @@ const emitInvestmentSeenToRoom = async (io, room, conversationId, seenMessageIds
 };
 
 export const createSocketServer = (httpServer) => {
+  const clientOrigins = (process.env.CLIENT_URL || "https://early-n.com")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: clientOrigins,
+      credentials: true,
       methods: ["GET", "POST"],
     },
   });
