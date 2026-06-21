@@ -173,6 +173,7 @@ const findTargetUser = async (userId) => {
 const getUserKyc = (userId) =>
   Kyc.findOne({ user: userId })
     .populate("approval.reviewedBy", "name email role")
+    .populate("fieldReviews.reviewedBy", "name email role")
     .lean();
 
 const getUserPitches = (userId) =>

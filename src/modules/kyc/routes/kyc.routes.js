@@ -33,6 +33,11 @@ router.patch(
   handleKycFileUpload,
   kycController.updateKyc
 );
+router.patch(
+  "/:kycId/fields/review",
+  authorize("superadmin"),
+  kycController.reviewKycField
+);
 router.delete("/:kycId", authorize("investor", "investee", "superadmin"), kycController.deleteKyc);
 
 export default router;

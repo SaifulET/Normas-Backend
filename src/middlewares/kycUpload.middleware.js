@@ -12,7 +12,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: maxFileSize,
-    files: 8,
+    files: 25,
   },
   fileFilter: (_req, file, cb) => {
     if (!isAllowedKycFile(file.mimetype)) {
@@ -26,6 +26,7 @@ const upload = multer({
 
 const uploadFields = [
   { name: "identityDocument", maxCount: 1 },
+  { name: "proofOfAddress", maxCount: 1 },
   { name: "utilityBill", maxCount: 1 },
   { name: "bankStatement", maxCount: 1 },
   { name: "facePhoto", maxCount: 1 },
@@ -33,10 +34,24 @@ const uploadFields = [
   { name: "salarySlip", maxCount: 1 },
   { name: "businessDocument", maxCount: 1 },
   { name: "taxReturns", maxCount: 1 },
+  { name: "certificateOfIncorporation", maxCount: 1 },
+  { name: "articlesOfAssociation", maxCount: 1 },
+  { name: "directorsShareholdersRegister", maxCount: 1 },
+  { name: "sourceOfWealthEvidence", maxCount: 1 },
+  { name: "proofOfFunds", maxCount: 1 },
+  { name: "corporateStructureChart", maxCount: 1 },
+  { name: "taxComplianceCertificate", maxCount: 1 },
+  { name: "otherSupportingDocuments", maxCount: 1 },
+  { name: "beneficialOwnerIdDocument0", maxCount: 1 },
+  { name: "beneficialOwnerIdDocument1", maxCount: 1 },
+  { name: "beneficialOwnerIdDocument2", maxCount: 1 },
+  { name: "beneficialOwnerIdDocument3", maxCount: 1 },
+  { name: "beneficialOwnerIdDocument4", maxCount: 1 },
 ];
 
 const uploadFieldToBodyPath = {
   identityDocument: ["personalIdentity", "identityDocument"],
+  proofOfAddress: ["addressVerification", "proofOfAddress"],
   utilityBill: ["addressVerification", "utilityBill"],
   bankStatement: ["addressVerification", "bankStatement"],
   facePhoto: ["faceVerification", "facePhoto"],
@@ -44,6 +59,19 @@ const uploadFieldToBodyPath = {
   salarySlip: ["sourceOfFunds", "salarySlip"],
   businessDocument: ["sourceOfFunds", "businessDocument"],
   taxReturns: ["sourceOfFunds", "taxReturns"],
+  certificateOfIncorporation: ["companyInformation", "certificateOfIncorporation"],
+  articlesOfAssociation: ["companyInformation", "articlesOfAssociation"],
+  directorsShareholdersRegister: ["companyInformation", "directorsShareholdersRegister"],
+  sourceOfWealthEvidence: ["additionalDocuments", "sourceOfWealthEvidence"],
+  proofOfFunds: ["additionalDocuments", "proofOfFunds"],
+  corporateStructureChart: ["additionalDocuments", "corporateStructureChart"],
+  taxComplianceCertificate: ["additionalDocuments", "taxComplianceCertificate"],
+  otherSupportingDocuments: ["additionalDocuments", "otherSupportingDocuments"],
+  beneficialOwnerIdDocument0: ["beneficialOwnerDocuments", "0", "idDocument"],
+  beneficialOwnerIdDocument1: ["beneficialOwnerDocuments", "1", "idDocument"],
+  beneficialOwnerIdDocument2: ["beneficialOwnerDocuments", "2", "idDocument"],
+  beneficialOwnerIdDocument3: ["beneficialOwnerDocuments", "3", "idDocument"],
+  beneficialOwnerIdDocument4: ["beneficialOwnerDocuments", "4", "idDocument"],
 };
 
 let cachedS3Client = null;

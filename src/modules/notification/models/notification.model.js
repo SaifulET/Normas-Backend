@@ -15,6 +15,8 @@ export const notificationTypes = [
   "pitch_restored",
   "moderation_alert",
   "moderation_warning",
+  "kyc_field_reviewed",
+  "kyc_field_updated",
 ];
 
 const notificationSchema = new mongoose.Schema(

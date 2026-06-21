@@ -84,6 +84,20 @@ export const updateKyc = async (req, res, next) => {
   }
 };
 
+export const reviewKycField = async (req, res, next) => {
+  try {
+    const result = await kycService.reviewKycField(req.user, req.params.kycId, req.body);
+
+    res.status(200).json({
+      success: true,
+      message: "KYC field reviewed successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const deleteKyc = async (req, res, next) => {
   try {
     const result = await kycService.deleteKycByUser(req.user, req.params.kycId);
