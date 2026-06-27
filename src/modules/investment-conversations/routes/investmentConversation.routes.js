@@ -1,10 +1,37 @@
 import express from "express";
 import * as investmentConversationController from "../controllers/investmentConversation.controller.js";
 import { authenticate, authorize } from "../../../middlewares/auth.middleware.js";
+import UserSubscription from "../../pricing/models/subscription.model.js";
 
 const router = express.Router();
+const investeeConversationStatuses = ["active", "cancel_at_period_end"];
+
+const requireInvesteeSubscription = async (req, res, next) => {
+  try {
+    if (req.user?.role !== "investee") {
+      return next();
+    }
+
+    const subscription = await UserSubscription.exists({
+      user: req.user.userId,
+      localStatus: { $in: investeeConversationStatuses },
+    });
+
+    if (!subscription) {
+      return res.status(403).json({
+        success: false,
+        message: "An active Investee subscription is required to use investor messages and scheduling",
+      });
+    }
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+};
 
 router.use(authenticate, authorize("investor", "investee", "superadmin"));
+router.use(requireInvesteeSubscription);
 
 router.get("/", investmentConversationController.getMyConversations);
 router.get("/inbox", investmentConversationController.getMyConversationInbox);

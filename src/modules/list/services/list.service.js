@@ -11,10 +11,12 @@ import {
   notifySuperadmins,
   notifyUsers,
 } from "../../notification/services/notification.service.js";
+import UserSubscription from "../../pricing/models/subscription.model.js";
 import List from "../models/list.model.js";
 import SavedList from "../models/savedList.model.js";
 
 const allowedStatuses = ["pending", "activated", "deactivated", "suspended", "under_review"];
+const publicSubscriptionStatuses = ["active", "cancel_at_period_end"];
 const editableContentFields = [
   "bannerImage",
   "title",
@@ -335,6 +337,57 @@ const buildFilteredListsQuery = (query = {}) => {
   return filters;
 };
 
+const getPublicSubscribedOwnerIds = () =>
+  UserSubscription.distinct("user", {
+    localStatus: { $in: publicSubscriptionStatuses },
+  });
+
+const buildPublicListFilters = async (filters = {}) => ({
+  ...filters,
+  user: { $in: await getPublicSubscribedOwnerIds() },
+});
+
+const isPubliclySubscribedOwner = async (userId) => {
+  if (!userId) {
+    return false;
+  }
+
+  return Boolean(
+    await UserSubscription.exists({
+      user: userId,
+      localStatus: { $in: publicSubscriptionStatuses },
+    })
+  );
+};
+
+const assertInvesteeSubscription = async (authUser) => {
+  if (authUser?.role !== "investee") {
+    return;
+  }
+
+  const hasSubscription = await isPubliclySubscribedOwner(authUser.userId);
+
+  if (!hasSubscription) {
+    throw new AppError("An active Investee subscription is required to manage pitch lists", 403);
+  }
+};
+
+const assertInvesteeActiveListLimit = async (authUser, list) => {
+  if (authUser?.role !== "investee") {
+    return;
+  }
+
+  const activeListCount = await List.countDocuments({
+    _id: { $ne: list._id },
+    status: "activated",
+    user: authUser.userId,
+  });
+
+  if (activeListCount >= 1) {
+    throw new AppError("Your Investee subscription includes 1 active pitch deck", 403);
+  }
+};
+
 const normalizeAdditionalDetails = (details = []) => {
   if (!Array.isArray(details)) {
     throw new AppError("additionalDetails must be an array", 400);
@@ -525,14 +578,16 @@ const appendRelatedLists = async ({ results, excludedIds, filters, limit }) => {
     return;
   }
 
+  const publicFilters = await buildPublicListFilters({
+    status: "activated",
+    ...filters,
+    _id: {
+      $nin: Array.from(excludedIds),
+    },
+  });
+
   const lists = await populateListQuery(
-    List.find({
-      status: "activated",
-      ...filters,
-      _id: {
-        $nin: Array.from(excludedIds),
-      },
-    })
+    List.find(publicFilters)
       .sort({ createdAt: -1 })
       .limit(remaining)
   );
@@ -551,14 +606,15 @@ const appendRandomRelatedLists = async ({ results, excludedIds, limit }) => {
     return;
   }
 
+  const publicFilters = await buildPublicListFilters({
+    status: "activated",
+    _id: {
+      $nin: Array.from(excludedIds).map((id) => new mongoose.Types.ObjectId(id)),
+    },
+  });
   const sampledLists = await List.aggregate([
     {
-      $match: {
-        status: "activated",
-        _id: {
-          $nin: Array.from(excludedIds).map((id) => new mongoose.Types.ObjectId(id)),
-        },
-      },
+      $match: publicFilters,
     },
     {
       $sample: {
@@ -648,6 +704,7 @@ const applyPostModeration = async (list, authUser) => {
 
 export const createList = async (authUser, payload) => {
   await getUserOrThrow(authUser.userId);
+  await assertInvesteeSubscription(authUser);
 
   const createdList = await List.create(await buildCreatePayload(authUser, payload));
   if (authUser.role === "superadmin") {
@@ -663,6 +720,7 @@ export const createList = async (authUser, payload) => {
 export const updateList = async (authUser, listId, payload) => {
   const list = await getListOrThrow(listId);
   assertOwnerOrSuperadmin(authUser, list);
+  await assertInvesteeSubscription(authUser);
 
   const content = await buildContentPayload(authUser, payload, list);
 
@@ -697,12 +755,13 @@ export const updateList = async (authUser, listId, payload) => {
 };
 
 export const getAllLists = async () => {
-  const lists = await List.find({ status: "activated" }).populate("user", "name email role").sort({ createdAt: -1 });
+  const filters = await buildPublicListFilters({ status: "activated" });
+  const lists = await List.find(filters).populate("user", "name email role").sort({ createdAt: -1 });
   return serializeListCollectionForViewer(lists);
 };
 
 export const getFilteredLists = async (query = {}) => {
-  const filters = buildFilteredListsQuery(query);
+  const filters = await buildPublicListFilters(buildFilteredListsQuery(query));
   const { page, limit } = parsePagination(query);
 
   const [lists, total] = await Promise.all([
@@ -726,15 +785,16 @@ export const getFilteredLists = async (query = {}) => {
 };
 
 export const getSectorListCounts = async (query = {}) => {
+  const publicFilters = await buildPublicListFilters({
+    status: "activated",
+    sector: {
+      $exists: true,
+      $ne: "",
+    },
+  });
   const sectors = await List.aggregate([
     {
-      $match: {
-        status: "activated",
-        sector: {
-          $exists: true,
-          $ne: "",
-        },
-      },
+      $match: publicFilters,
     },
     {
       $group: {
@@ -773,6 +833,16 @@ export const getListById = async (listId, authUser = null) => {
     const isSuperadmin = authUser?.role === "superadmin";
 
     if (!isOwner && !isSuperadmin) {
+      throw new AppError("List not found", 404);
+    }
+  }
+
+  if (list.status === "activated") {
+    const isOwner = authUser?.userId && String(list.user) === String(authUser.userId);
+    const isSuperadmin = authUser?.role === "superadmin";
+    const ownerHasPublicSubscription = await isPubliclySubscribedOwner(list.user);
+
+    if (!ownerHasPublicSubscription && !isOwner && !isSuperadmin) {
       throw new AppError("List not found", 404);
     }
   }
@@ -1112,12 +1182,18 @@ export const changeListStatus = async (authUser, listId, status) => {
       throw new AppError("Investees can only activate or deactivate their own pitch", 403);
     }
 
+    await assertInvesteeSubscription(authUser);
+
     if (list.approvalStatus === "pending_create" || list.status === "pending") {
       throw new AppError("This pitch must be activated by superadmin before you can manage its public status.", 403);
     }
 
     if (["suspended", "under_review"].includes(list.status)) {
       throw new AppError("This pitch is suspended or under review. Please contact support center to restore it.", 403);
+    }
+
+    if (requestedStatus === "activated") {
+      await assertInvesteeActiveListLimit(authUser, list);
     }
   }
 
