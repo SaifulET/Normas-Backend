@@ -1,4 +1,8 @@
 import mongoose from "mongoose";
+import {
+  findPhoneNumbersInText,
+  parsePhoneNumberFromString,
+} from "libphonenumber-js";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
 import List from "../../list/models/list.model.js";
@@ -12,13 +16,16 @@ const bangladeshLocationWords =
   "dhaka|mohakhali|gulshan|banani|uttara|mirpur|dhanmondi|bashundhara|baridhara|badda|tejgaon|farmgate|motijheel|wari|khilgaon|khilkhet|niketon|nikunja|shyamoli|mohammadpur|jatrabari|bashabo|airport|savar|narayanganj|gazipur|chattogram|chittagong|sylhet|khulna|rajshahi|barisal|rangpur|mymensingh|cumilla";
 
 const contactPatterns = [
-  ["Phone number", /(?:\+?\d[\d\s().-]{7,}\d)|(?:^\s*(?:number|phone|mobile|cell)\s*$)|(?:\b(?:call|phone|mobile|cell|number)\s*(?:me|us)?\s*(?:at|on)?\s*[:#-]?\s*\d{5,})|(?:\b(?:give|send|share|provide|drop)\s+(?:me|us\s+)?(?:your|you|ur)?\s*(?:phone|mobile|cell|number)\b)|(?:\b(?:your|you|ur)\s+(?:phone|mobile|cell|number)\b)/i],
+  ["Phone number", /(?:^\s*(?:number|phone|mobile|cell)\s*$)|(?:\b(?:call|phone|mobile|cell|number)\s*(?:me|us)?\s*(?:at|on)?\s*[:#-]?\s*\d{5,})|(?:\b(?:give|send|share|provide|drop)\s+(?:me|us\s+)?(?:your|you|ur)?\s*(?:phone|mobile|cell|number)\b)|(?:\b(?:your|you|ur)\s+(?:phone|mobile|cell|number)\b)/i],
   ["Email", /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i],
   ["WhatsApp", /\b(?:whats\s*app|whatsapp|wa\.me|api\.whatsapp\.com)\b/i],
   ["Telegram", /\b(?:telegram|t\.me|telegram\.me)\b/i],
   ["Facebook", /\b(?:facebook|fb\.com|facebook\.com|messenger\.com)\b/i],
-  ["Instagram", /\b(?:instagram|insta|ig:|instagram\.com)\b/i],
+  ["Instagram", /\b(?:instagram|insta|ig\s*[:=]?|instagram\.com)\b/i],
   ["LinkedIn", /\b(?:linkedin|linkedin\.com)\b/i],
+  ["TikTok", /\b(?:tiktok|tiktok\.com)\b/i],
+  ["X/Twitter", /\b(?:twitter|x\.com)\b/i],
+  ["YouTube", /\b(?:youtube|youtu\.be|youtube\.com)\b/i],
   ["Website link", /\b(?:https?:\/\/|www\.)[^\s<]+|\b[a-z0-9-]+\.(?:com|net|org|io|co|ai|app|dev|me|biz|info|bd|uk|us)\b/i],
   ["External handle", /(?:^|\s)@[a-z0-9_.-]{3,}\b/i],
   ["Google Maps link", /\b(?:maps\.app\.goo\.gl|goo\.gl\/maps|google\.com\/maps|maps\.google)\b/i],
@@ -64,6 +71,8 @@ const spamSignals = [
   /^[^a-z0-9]+$/i,
 ];
 
+const defaultPhoneCountries = ["BD", "US", "GB", "IN", "PK", "AE", "SA", "CA", "AU", "SG", "MY"];
+
 const normalizeText = (value) => String(value || "").trim();
 
 const stripHtml = (value) =>
@@ -76,6 +85,67 @@ const stripHtml = (value) =>
     .trim();
 
 const unique = (values = []) => [...new Set(values.filter(Boolean))];
+
+const normalizeObfuscatedContactText = (value) =>
+  stripHtml(value)
+    .toLowerCase()
+    .replace(/\s*(?:\[|\(|\{)\s*at\s*(?:\]|\)|\})\s*/g, "@")
+    .replace(/\s+(?:at)\s+/g, " @ ")
+    .replace(/\s*(?:\[|\(|\{)\s*dot\s*(?:\]|\)|\})\s*/g, ".")
+    .replace(/\s+(?:dot)\s+/g, ".")
+    .replace(/\s*(?:\[|\(|\{)\s*underscore\s*(?:\]|\)|\})\s*/g, "_")
+    .replace(/\s+(?:underscore)\s+/g, "_")
+    .replace(/\s*(?:\[|\(|\{)\s*dash\s*(?:\]|\)|\})\s*/g, "-")
+    .replace(/\s+(?:dash|hyphen)\s+/g, "-")
+    .replace(/\s*(?:\[|\(|\{)\s*slash\s*(?:\]|\)|\})\s*/g, "/")
+    .replace(/\s+(?:slash)\s+/g, "/")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const getPhoneCandidates = (text) => {
+  const candidatePattern = /(?:^|[^\w])((?:\+|00)?\d[\d\s().-]{7,}\d)(?=$|[^\w])/gi;
+  return [...text.matchAll(candidatePattern)].map((match) => match[1].trim());
+};
+
+const isDateLikePhoneText = (value) => {
+  const compactValue = normalizeText(value).replace(/\s+/g, "");
+
+  return (
+    /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(compactValue) ||
+    /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(compactValue)
+  );
+};
+
+const isValidPhoneCandidate = (candidate) =>
+  !isDateLikePhoneText(candidate) &&
+  defaultPhoneCountries.some((country) => {
+    const phoneNumber = parsePhoneNumberFromString(candidate, {
+      defaultCountry: country,
+      extract: false,
+    });
+
+    return Boolean(phoneNumber?.isValid());
+  });
+
+const hasValidPhoneNumber = (value) => {
+  const text = normalizeObfuscatedContactText(value);
+  const detectedNumbers = [
+    ...findPhoneNumbersInText(text),
+    ...findPhoneNumbersInText(text, { defaultCountry: "BD" }),
+  ];
+
+  if (
+    detectedNumbers.some((result) => {
+      const matchedText = text.slice(result.startsAt, result.endsAt);
+
+      return result.number?.isValid() && !isDateLikePhoneText(matchedText);
+    })
+  ) {
+    return true;
+  }
+
+  return getPhoneCandidates(text).some(isValidPhoneCandidate);
+};
 
 const tokenize = (value) =>
   stripHtml(value)
@@ -122,9 +192,15 @@ const titleMatchesDescription = ({ description, title }) => {
 
 export const detectContactDetails = (value) => {
   const text = stripHtml(value);
+  const normalizedText = normalizeObfuscatedContactText(text);
+  const searchableText = unique([text, normalizedText]).join(" ");
   const reasons = contactPatterns
-    .filter(([, pattern]) => pattern.test(text))
+    .filter(([, pattern]) => pattern.test(searchableText))
     .map(([reason]) => reason);
+
+  if (hasValidPhoneNumber(searchableText)) {
+    reasons.push("Phone number");
+  }
 
   return {
     flagged: reasons.length > 0,
