@@ -19,6 +19,11 @@ import adminUserRoutes from "./modules/admin-users/routes/adminUser.routes.js";
 import adminAnalyticsRoutes from "./modules/analytics/routes/adminAnalytics.routes.js";
 import notificationRoutes from "./modules/notification/routes/notification.routes.js";
 import moderationRoutes from "./modules/moderation/routes/moderation.routes.js";
+import {
+  investeeNoticeRouter,
+  investorNoticeRouter,
+  superadminNoticeRouter,
+} from "./modules/notice/routes/notice.routes.js";
 import { optionalAuthenticate } from "./middlewares/optionalAuth.middleware.js";
 
 const app = express();
@@ -66,6 +71,9 @@ app.use("/api/v1/admin/users", adminUserRoutes);
 app.use("/api/v1/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/moderation", moderationRoutes);
+app.use("/api/v1/super-admin/notices", superadminNoticeRouter);
+app.use("/api/v1/investor/notices", investorNoticeRouter);
+app.use("/api/v1/investee/notices", investeeNoticeRouter);
 
 app.use((req, res) => {
   res.status(404).json({

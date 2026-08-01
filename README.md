@@ -12,6 +12,7 @@ Normas-Backend is the Express and MongoDB API service for Early-N. It provides a
 - Investment conversations, messages, and meeting requests.
 - Support center conversations.
 - Reports, moderation alerts, reviews, FAQs, legal content, schedules, notifications, and admin analytics.
+- Superadmin admin notices with dashboard notifications and queued SES email delivery.
 - Socket.IO server for real-time messages and notifications.
 
 ## Tech Stack
@@ -81,7 +82,82 @@ POST /api/v1/payment/subscription/webhook
 /api/v1/admin/analytics
 /api/v1/notifications
 /api/v1/moderation
+/api/v1/super-admin/notices
+/api/v1/investor/notices
+/api/v1/investee/notices
 ```
+
+## Admin Notice System
+
+Superadmins can create dashboard notices with optional S3 images:
+
+```http
+POST /api/v1/super-admin/notices
+Content-Type: multipart/form-data
+```
+
+Fields: `title`, `message`, `targetType` (`investor`, `investee`, or `all`), and optional `image`.
+
+Notice endpoints:
+
+```text
+POST   /api/v1/super-admin/notices
+GET    /api/v1/super-admin/notices
+GET    /api/v1/super-admin/notices/:noticeId
+PATCH  /api/v1/super-admin/notices/:noticeId
+PATCH  /api/v1/super-admin/notices/:noticeId/archive
+DELETE /api/v1/super-admin/notices/:noticeId
+POST   /api/v1/super-admin/notices/:noticeId/retry-failed-emails
+POST   /api/v1/super-admin/notices/images
+DELETE /api/v1/super-admin/notices/images
+
+GET    /api/v1/investor/notices
+GET    /api/v1/investor/notices/:noticeId
+PATCH  /api/v1/investor/notices/:noticeId/read
+
+GET    /api/v1/investee/notices
+GET    /api/v1/investee/notices/:noticeId
+PATCH  /api/v1/investee/notices/:noticeId/read
+```
+
+By default, notice creation starts a short email queue drain automatically and stops when SQS is idle:
+
+```env
+NOTICE_AUTO_DRAIN_EMAIL_QUEUE=true
+```
+
+For higher-volume production deployments, you can disable auto-drain and run the email worker separately:
+
+```bash
+npm run notice-worker
+```
+
+To drain the current queue once and then stop:
+
+```bash
+npm run notice-worker-once
+```
+
+Recover notices that were created while the server or queue was interrupted:
+
+```bash
+npm run notice-dispatch
+```
+
+AWS requirements:
+
+- `AWS_REGION`
+- `AWS_S3_BUCKET` or `AWS_BUCKET_NAME`
+- `AWS_S3_NOTICE_FOLDER=notices`
+- `AWS_SQS_NOTICE_EMAIL_QUEUE_URL`
+- `AWS_SQS_NOTICE_EMAIL_DLQ_URL` configured as the queue dead-letter target in AWS
+- `AWS_SES_FROM_EMAIL=info@earlyn.com`
+- `NOTICE_EMAIL_PROVIDER=auto` (`auto`, `ses`, or `smtp`)
+- `NOTICE_SMTP_FROM_EMAIL` optional SMTP sender override
+- `NOTICE_AUTO_DRAIN_EMAIL_QUEUE=true`
+- `NOTICE_PENDING_REQUEUE_AFTER_MS=120000`
+- `FRONTEND_URL`
+- `NOTICE_WORKER_CONCURRENCY=5`
 
 ## Authentication
 
@@ -96,6 +172,3 @@ Roles used by the platform:
 - `investor`
 - `investee`
 - `superadmin`
-
-
-

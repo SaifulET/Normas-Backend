@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 export const notificationTypes = [
+  "ADMIN_NOTICE",
   "schedule_created",
   "schedule_starting_soon",
   "schedule_due",
