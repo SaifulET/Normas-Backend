@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export const noticeTargetTypes = ["investor", "investee", "all"];
+export const noticeTargetTypes = ["investor", "investee", "all", "custom"];
 export const noticeStatuses = ["processing", "published", "partially_failed", "archived"];
 
 const noticeImageSchema = new mongoose.Schema(
@@ -50,6 +50,18 @@ const noticeEmailStatsSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const noticeCustomRecipientSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+    },
+  },
+  { _id: false }
+);
+
 const noticeSchema = new mongoose.Schema(
   {
     title: {
@@ -94,6 +106,10 @@ const noticeSchema = new mongoose.Schema(
     emailStats: {
       type: noticeEmailStatsSchema,
       default: () => ({}),
+    },
+    customRecipients: {
+      type: [noticeCustomRecipientSchema],
+      default: [],
     },
   },
   {

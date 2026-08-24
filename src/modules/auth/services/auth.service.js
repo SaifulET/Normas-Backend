@@ -1,23 +1,73 @@
 import bcrypt from "bcryptjs";
+import { SendEmailCommand, SESClient } from "@aws-sdk/client-ses";
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import AppError from "../../../utils/appError.js";
+import {
+  escapeEmailHtml,
+  getEmailFromHeader,
+  getEmailReplyTo,
+  getSmtpEnvelopeFrom,
+  wrapBrandedEmail,
+} from "../../email/services/emailBranding.service.js";
 import { notifyUserRegistered } from "../../notification/services/notification.service.js";
 import User from "../models/user.model.js";
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: String(process.env.SMTP_SECURE) === "true",
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+let cachedOtpSesClient = null;
 
 const generateOtp = () => Math.floor(1000 + Math.random() * 9000).toString();
 
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+
+const getAuthEmailProvider = () => {
+  const provider = (process.env.AUTH_EMAIL_PROVIDER || process.env.EMAIL_PROVIDER || "smtp").trim().toLowerCase();
+
+  return provider === "ses" ? "ses" : "smtp";
+};
+
+const getAwsRegion = () => {
+  const region = process.env.AWS_REGION?.trim();
+
+  if (!region) {
+    throw new AppError("AWS_REGION is not configured", 500);
+  }
+
+  return region;
+};
+
+const getAwsCredentials = () => {
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim();
+
+  return accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : undefined;
+};
+
+const getOtpSesClient = () => {
+  if (!cachedOtpSesClient) {
+    cachedOtpSesClient = new SESClient({
+      region: getAwsRegion(),
+      credentials: getAwsCredentials(),
+    });
+  }
+
+  return cachedOtpSesClient;
+};
+
+const getOtpEmailTransporter = () => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_PORT || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new AppError("Password reset email is not configured", 500);
+  }
+
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: String(process.env.SMTP_SECURE) === "true",
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+};
 
 const validateSignupPayload = ({ name, role, email, password }) => {
   if (!name || !role || !email || !password) {
@@ -67,20 +117,80 @@ const buildAuthResponse = (user, accessToken, refreshToken) => ({
 });
 
 const sendOtpEmail = async (email, otp, name) => {
-  await transporter.sendMail({
-    from: process.env.SMTP_USER,
-    to: email,
-    subject: "Password Reset OTP",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Password Reset Request</h2>
-        <p>Hello ${name},</p>
-        <p>Your password reset OTP is:</p>
-        <h1 style="letter-spacing: 8px;">${otp}</h1>
-        <p>This OTP will expire in ${process.env.OTP_EXPIRES_IN_MINUTES || 10} minutes.</p>
-      </div>
-    `,
+  const expiresInMinutes = process.env.OTP_EXPIRES_IN_MINUTES || 10;
+  const replyTo = getEmailReplyTo();
+  const envelopeFrom = getSmtpEnvelopeFrom();
+  const bodyHtml = `
+    <p style="margin:0 0 14px 0;font-size:14px;line-height:1.7;color:#52627A;">Hello ${escapeEmailHtml(name)},</p>
+    <h1 style="margin:0 0 12px 0;font-size:24px;line-height:1.25;color:#17213F;">Password reset request</h1>
+    <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:#52627A;">Use this OTP to continue resetting your password.</p>
+    <div style="margin:0 0 20px 0;padding:18px 20px;background:#F4F7FB;border:1px solid #DEE5F0;border-radius:8px;text-align:center;">
+      <div style="font-size:34px;line-height:1;font-weight:800;letter-spacing:8px;color:#17213F;">${escapeEmailHtml(otp)}</div>
+    </div>
+    <p style="margin:0;font-size:13px;line-height:1.7;color:#667085;">This OTP will expire in ${escapeEmailHtml(expiresInMinutes)} minutes. If you did not request this, you can ignore this email.</p>
+  `;
+
+  const subject = "Password Reset OTP";
+  const html = wrapBrandedEmail({
+    title: subject,
+    previewText: "Use your Early-N password reset OTP to continue.",
+    bodyHtml,
   });
+  const text = [
+    `Hello ${name || "there"},`,
+    "",
+    "Password reset request",
+    `Your password reset OTP is: ${otp}`,
+    `This OTP will expire in ${expiresInMinutes} minutes.`,
+  ].join("\n");
+
+  try {
+    if (getAuthEmailProvider() === "ses") {
+      await getOtpSesClient().send(
+        new SendEmailCommand({
+          Source: getEmailFromHeader(),
+          Destination: {
+            ToAddresses: [email],
+          },
+          ReplyToAddresses: replyTo ? [replyTo] : undefined,
+          Message: {
+            Subject: {
+              Charset: "UTF-8",
+              Data: subject,
+            },
+            Body: {
+              Html: {
+                Charset: "UTF-8",
+                Data: html,
+              },
+              Text: {
+                Charset: "UTF-8",
+                Data: text,
+              },
+            },
+          },
+        })
+      );
+      return;
+    }
+
+    await getOtpEmailTransporter().sendMail({
+      from: getEmailFromHeader(),
+      to: email,
+      ...(replyTo ? { replyTo } : {}),
+      ...(envelopeFrom ? { envelope: { from: envelopeFrom, to: email } } : {}),
+      subject,
+      html,
+      text,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+
+    console.error("Password reset OTP email failed:", error.message);
+    throw new AppError("Unable to send password reset OTP email. Please try again later.", 502);
+  }
 };
 
 export const signup = async ({ name, role, email, password }) => {

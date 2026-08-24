@@ -1,10 +1,16 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { DeleteMessageCommand, ReceiveMessageCommand, SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { SendEmailCommand, SESClient } from "@aws-sdk/client-ses";
 import mongoose from "mongoose";
 import nodemailer from "nodemailer";
 import AppError from "../../../utils/appError.js";
 import User from "../../auth/models/user.model.js";
+import {
+  getEmailFromHeader,
+  getEmailReplyTo,
+  getSmtpEnvelopeFrom,
+  wrapBrandedEmail,
+} from "../../email/services/emailBranding.service.js";
 import Notification from "../../notification/models/notification.model.js";
 import { notifyUsers } from "../../notification/services/notification.service.js";
 import Notice, { noticeTargetTypes } from "../models/notice.model.js";
@@ -15,7 +21,6 @@ const activeTargetStatuses = ["active", "pending"];
 const recipientBatchSize = Number(process.env.NOTICE_RECIPIENT_BATCH_SIZE || 100);
 const workerConcurrency = Math.min(Math.max(Number(process.env.NOTICE_WORKER_CONCURRENCY || 5), 1), 10);
 const pendingRequeueAfterMs = Number(process.env.NOTICE_PENDING_REQUEUE_AFTER_MS || 120000);
-const sesFromEmail = "info@earlyn.com";
 
 let cachedSqsClient = null;
 let cachedSesClient = null;
@@ -24,6 +29,7 @@ let noticeEmailDrainPromise = null;
 
 const normalizeText = (value) => String(value || "").trim();
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const parsePagination = ({ page = 1, limit = 20 } = {}) => {
   const normalizedPage = Math.max(Number(page) || 1, 1);
@@ -59,6 +65,46 @@ const sanitizeNoticeHtml = (html) =>
     .replace(/<\s*(script|iframe|object|embed|link|meta|style)\b[^>]*\/?>/gi, "")
     .replace(/\s(?:on[a-z]+)\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi, "")
     .replace(/\s(href|src)\s*=\s*(?:"\s*javascript:[^"]*"|'\s*javascript:[^']*'|javascript:[^\s>]+)/gi, "");
+
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+
+const parseCustomRecipientEmails = (value) => {
+  if (!value) {
+    return [];
+  }
+
+  let items = value;
+
+  if (typeof value === "string") {
+    try {
+      items = JSON.parse(value);
+    } catch {
+      items = value.split(/[\s,;]+/);
+    }
+  }
+
+  if (!Array.isArray(items)) {
+    throw new AppError("customRecipientEmails must be an array of email addresses", 400);
+  }
+
+  const emails = [...new Set(items.map(normalizeEmail).filter(Boolean))];
+  const invalidEmail = emails.find((email) => !emailPattern.test(email));
+
+  if (invalidEmail) {
+    throw new AppError(`Invalid recipient email: ${invalidEmail}`, 400);
+  }
+
+  if (emails.length > 100) {
+    throw new AppError("A notice can include up to 100 custom recipient emails", 400);
+  }
+
+  return emails;
+};
+
+const buildCustomRecipientUserId = (email) => {
+  const hex = createHash("sha1").update(`notice-custom-recipient:${email}`).digest("hex").slice(0, 24);
+  return new mongoose.Types.ObjectId(hex);
+};
 
 const getNoticeFolderPrefix = () => `${(process.env.AWS_S3_NOTICE_FOLDER?.trim() || "notices").replace(/^\/+|\/+$/g, "")}/`;
 
@@ -152,8 +198,6 @@ const getNoticeEmailProvider = () => {
 
 const shouldAutoDrainNoticeEmailQueue = () => process.env.NOTICE_AUTO_DRAIN_EMAIL_QUEUE !== "false";
 
-const getNoticeSenderEmail = () => process.env.AWS_SES_FROM_EMAIL?.trim() || sesFromEmail;
-
 const isSmtpConfigured = () =>
   Boolean(
     process.env.SMTP_HOST?.trim() &&
@@ -187,6 +231,10 @@ const getSmtpTransporter = () => {
 const getTargetRoles = (targetType) => {
   if (targetType === "all") {
     return ["investor", "investee"];
+  }
+
+  if (targetType === "custom") {
+    return [];
   }
 
   return [targetType];
@@ -289,19 +337,29 @@ const refreshNoticeEmailStats = async (noticeId) => {
   return stats;
 };
 
-const queueNoticeEmailDelivery = async ({ notice, user }) => {
+const queueNoticeEmailDelivery = async ({ notice, user = null, recipientEmail = "", recipientType = "user" }) => {
+  const normalizedRecipientEmail = normalizeEmail(recipientEmail || user?.email);
+
+  if (!normalizedRecipientEmail || !emailPattern.test(normalizedRecipientEmail)) {
+    throw new AppError("A valid recipient email is required", 400);
+  }
+
+  const deliveryUserId = user?._id || buildCustomRecipientUserId(normalizedRecipientEmail);
+  const normalizedRecipientType = user?._id ? "user" : recipientType;
+
   const delivery = await NoticeEmailDelivery.findOneAndUpdate(
     {
       notice: notice._id,
-      user: user._id,
+      recipientEmail: normalizedRecipientEmail,
     },
     {
       $setOnInsert: {
         jobId: randomUUID(),
         notice: notice._id,
-        recipientEmail: user.email,
+        recipientEmail: normalizedRecipientEmail,
+        recipientType: normalizedRecipientType,
         status: "pending",
-        user: user._id,
+        user: deliveryUserId,
       },
     },
     {
@@ -322,8 +380,9 @@ const queueNoticeEmailDelivery = async ({ notice, user }) => {
         MessageBody: JSON.stringify({
           jobId: delivery.jobId,
           noticeId: notice._id.toString(),
-          recipientEmail: user.email,
-          userId: user._id.toString(),
+          recipientEmail: normalizedRecipientEmail,
+          recipientType: normalizedRecipientType,
+          userId: deliveryUserId.toString(),
         }),
       })
     );
@@ -410,6 +469,16 @@ export const processNoticeRecipients = async (noticeId) => {
     failedCount += deliveryResults.filter((result) => result.status === "rejected").length;
   }
 
+  const customRecipients = (notice.customRecipients || []).map((recipient) => recipient.email).filter(Boolean);
+
+  if (customRecipients.length > 0) {
+    const customDeliveryResults = await Promise.allSettled(
+      customRecipients.map((email) => queueNoticeEmailDelivery({ notice, recipientEmail: email, recipientType: "custom" }))
+    );
+
+    failedCount += customDeliveryResults.filter((result) => result.status === "rejected").length;
+  }
+
   const emailStats = await refreshNoticeEmailStats(notice._id);
   notice.status = failedCount > 0 || emailStats.failed > 0 ? "partially_failed" : "published";
   notice.emailStats = emailStats;
@@ -468,18 +537,32 @@ export const recoverNoticeDispatches = async () => {
 
   for (const delivery of pendingDeliveries) {
     try {
-      const [notice, user] = await Promise.all([
-        Notice.findById(delivery.notice),
-        User.findOne({
-          _id: delivery.user,
-          accountStatus: { $in: activeTargetStatuses },
-        }).select("_id email role accountStatus"),
-      ]);
+      const notice = await Notice.findById(delivery.notice);
 
-      if (!notice || notice.status === "archived" || !user || !getTargetRoles(notice.targetType).includes(user.role)) {
+      if (!notice || notice.status === "archived") {
         delivery.status = "failed";
         delivery.failedAt = new Date();
-        delivery.lastError = "Recipient or notice is no longer eligible";
+        delivery.lastError = "Notice is no longer eligible";
+        await delivery.save();
+        failedPendingEmails += 1;
+        continue;
+      }
+
+      if (delivery.recipientType === "custom") {
+        await queueNoticeEmailDelivery({ notice, recipientEmail: delivery.recipientEmail, recipientType: "custom" });
+        requeuedPendingEmails += 1;
+        continue;
+      }
+
+      const user = await User.findOne({
+        _id: delivery.user,
+        accountStatus: { $in: activeTargetStatuses },
+      }).select("_id email role accountStatus");
+
+      if (!user || !getTargetRoles(notice.targetType).includes(user.role)) {
+        delivery.status = "failed";
+        delivery.failedAt = new Date();
+        delivery.lastError = "Recipient is no longer eligible";
         await delivery.save();
         failedPendingEmails += 1;
         continue;
@@ -506,6 +589,7 @@ export const createNotice = async (authUser, payload = {}) => {
   const title = normalizeText(payload.title);
   const message = sanitizeNoticeHtml(normalizeText(payload.message));
   const targetType = normalizeText(payload.targetType);
+  const customRecipientEmails = parseCustomRecipientEmails(payload.customRecipientEmails);
 
   if (!title) {
     throw new AppError("title is required", 400);
@@ -516,7 +600,11 @@ export const createNotice = async (authUser, payload = {}) => {
   }
 
   if (!noticeTargetTypes.includes(targetType)) {
-    throw new AppError("targetType must be investor, investee, or all", 400);
+    throw new AppError("targetType must be investor, investee, all, or custom", 400);
+  }
+
+  if (targetType === "custom" && customRecipientEmails.length === 0) {
+    throw new AppError("At least one additional email recipient is required when no audience is selected", 400);
   }
 
   const notice = await Notice.create({
@@ -524,6 +612,7 @@ export const createNotice = async (authUser, payload = {}) => {
     message,
     targetType,
     image: payload.image || null,
+    customRecipients: customRecipientEmails.map((email) => ({ email })),
     createdBy: authUser.userId,
     status: "processing",
     publishedAt: new Date(),
@@ -592,7 +681,7 @@ export const getSuperadminNotices = async (query = {}) => {
 
   if (targetType) {
     if (!noticeTargetTypes.includes(targetType)) {
-      throw new AppError("targetType must be investor, investee, or all", 400);
+      throw new AppError("targetType must be investor, investee, all, or custom", 400);
     }
 
     filters.targetType = targetType;
@@ -694,8 +783,9 @@ export const retryFailedNoticeEmails = async (noticeId) => {
 
     lastId = deliveries[deliveries.length - 1]._id;
 
+    const userDeliveries = deliveries.filter((delivery) => delivery.recipientType !== "custom");
     const users = await User.find({
-      _id: { $in: deliveries.map((delivery) => delivery.user) },
+      _id: { $in: userDeliveries.map((delivery) => delivery.user) },
       accountStatus: { $in: activeTargetStatuses },
       role: { $in: getTargetRoles(notice.targetType) },
     })
@@ -705,6 +795,19 @@ export const retryFailedNoticeEmails = async (noticeId) => {
 
     const results = await Promise.allSettled(
       deliveries.map((delivery) => {
+        if (delivery.recipientType === "custom") {
+          delivery.status = "pending";
+          return delivery
+            .save()
+            .then(() =>
+              queueNoticeEmailDelivery({
+                notice,
+                recipientEmail: delivery.recipientEmail,
+                recipientType: "custom",
+              })
+            );
+        }
+
         const user = usersById.get(delivery.user.toString());
 
         if (!user) {
@@ -826,38 +929,56 @@ const buildNoticeLoginUrl = (user, noticeId) => {
 };
 
 const buildNoticeEmail = ({ notice, user }) => {
-  const dashboardUrl = buildDashboardUrl(user, notice._id);
-  const noticeEntryUrl = buildNoticeLoginUrl(user, notice._id);
+  const canOpenDashboardNotice = Boolean(user?.role);
+  const dashboardUrl = canOpenDashboardNotice ? buildDashboardUrl(user, notice._id) : "";
+  const noticeEntryUrl = canOpenDashboardNotice ? buildNoticeLoginUrl(user, notice._id) : "";
   const title = escapeHtml(notice.title);
   const message = sanitizeNoticeHtml(notice.message);
   const textMessage = stripHtml(notice.message);
   const imageHtml = notice.image?.url
     ? `<img src="${escapeHtml(notice.image.url)}" alt="" style="display:block;width:100%;max-width:560px;border-radius:12px;margin:20px 0;" />`
     : "";
+  const actionHtml = canOpenDashboardNotice
+    ? `
+      <p style="margin:24px 0 0 0;">
+        <a href="${escapeHtml(noticeEntryUrl)}" style="display:inline-block;background:#314B6B;color:#fff;text-decoration:none;border-radius:8px;padding:11px 18px;font-weight:700;">Open notice</a>
+      </p>
+    `
+    : "";
+
+  const bodyHtml = `
+    <p style="margin:0 0 14px 0;font-size:14px;line-height:1.7;color:#52627A;">Hello ${escapeHtml(user.name || "there")},</p>
+    <h1 style="margin:0 0 14px 0;font-size:24px;line-height:1.25;color:#17213F;">${title}</h1>
+    ${imageHtml}
+    <div style="font-size:15px;line-height:1.7;color:#344054;">${message}</div>
+    ${actionHtml}
+  `;
 
   return {
-    html: `
-      <div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#1E2746;line-height:1.6;">
-        <p style="font-size:14px;color:#667085;">Hello ${escapeHtml(user.name || "there")},</p>
-        <h1 style="font-size:24px;line-height:1.25;margin:12px 0;">${title}</h1>
-        ${imageHtml}
-        <div style="font-size:15px;">${message}</div>
-        <p style="margin-top:24px;">
-          <a href="${escapeHtml(noticeEntryUrl)}" style="display:inline-block;background:#314B6B;color:#fff;text-decoration:none;border-radius:8px;padding:11px 18px;font-weight:700;">Open notice</a>
-        </p>
-      </div>
-    `,
-    text: [`Hello ${user.name || "there"},`, "", notice.title, "", textMessage, "", `Open notice: ${noticeEntryUrl}`, "", `Direct notice link: ${dashboardUrl}`].join("\n"),
+    html: wrapBrandedEmail({
+      title: notice.title,
+      previewText: textMessage || notice.title,
+      bodyHtml,
+    }),
+    text: [
+      `Hello ${user.name || "there"},`,
+      "",
+      notice.title,
+      "",
+      textMessage,
+      ...(canOpenDashboardNotice ? ["", `Open notice: ${noticeEntryUrl}`, "", `Direct notice link: ${dashboardUrl}`] : []),
+    ].join("\n"),
   };
 };
 
 const sendNoticeEmailWithSes = async ({ delivery, email, notice }) => {
   const response = await getSesClient().send(
     new SendEmailCommand({
-      Source: getNoticeSenderEmail(),
+      Source: getEmailFromHeader(),
       Destination: {
         ToAddresses: [delivery.recipientEmail],
       },
+      ReplyToAddresses: getEmailReplyTo() ? [getEmailReplyTo()] : undefined,
       Message: {
         Subject: {
           Charset: "UTF-8",
@@ -881,9 +1002,13 @@ const sendNoticeEmailWithSes = async ({ delivery, email, notice }) => {
 };
 
 const sendNoticeEmailWithSmtp = async ({ delivery, email, notice }) => {
+  const replyTo = getEmailReplyTo();
+  const envelopeFrom = getSmtpEnvelopeFrom();
   const response = await getSmtpTransporter().sendMail({
-    from: process.env.NOTICE_SMTP_FROM_EMAIL?.trim() || process.env.SMTP_USER?.trim() || getNoticeSenderEmail(),
+    from: getEmailFromHeader(),
     to: delivery.recipientEmail,
+    ...(replyTo ? { replyTo } : {}),
+    ...(envelopeFrom ? { envelope: { from: envelopeFrom, to: delivery.recipientEmail } } : {}),
     subject: notice.title,
     html: email.html,
     text: email.text,
@@ -948,18 +1073,27 @@ export const processNoticeEmailJob = async (job) => {
 
   const [notice, user] = await Promise.all([
     Notice.findById(delivery.notice),
-    User.findById(delivery.user).select("name email role accountStatus"),
+    delivery.recipientType === "custom"
+      ? Promise.resolve(null)
+      : User.findById(delivery.user).select("name email role accountStatus"),
   ]);
 
   if (!notice) {
     throw new AppError("Notice not found", 404);
   }
 
-  if (!user || !activeTargetStatuses.includes(user.accountStatus) || !getTargetRoles(notice.targetType).includes(user.role)) {
+  if (delivery.recipientType !== "custom" && (!user || !activeTargetStatuses.includes(user.accountStatus) || !getTargetRoles(notice.targetType).includes(user.role))) {
     throw new AppError("Recipient is no longer eligible", 400);
   }
 
-  const email = buildNoticeEmail({ notice, user });
+  const email = buildNoticeEmail({
+    notice,
+    user: user || {
+      email: delivery.recipientEmail,
+      name: "",
+      role: "",
+    },
+  });
 
   try {
     const providerMessageId = await sendNoticeEmail({ delivery, email, notice });
@@ -1051,7 +1185,7 @@ export const startNoticeEmailWorker = async () => {
   if (getNoticeEmailProvider() === "smtp") {
     getSmtpTransporter();
   } else {
-    getNoticeSenderEmail();
+    getEmailFromHeader();
   }
 
   while (true) {

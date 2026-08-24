@@ -10,6 +10,7 @@
     "notice-worker": "node src/workers/noticeEmail.worker.js",
     "notice-worker-once": "node src/workers/noticeEmailOnce.worker.js",
     "notice-dispatch": "node src/workers/noticeDispatch.worker.js",
+    "upload-email-asset": "node scripts/upload-email-asset.mjs",
     "test": "echo \"No tests configured\""
   },
   "keywords": [],

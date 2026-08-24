@@ -22,6 +22,12 @@ const noticeEmailDeliverySchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    recipientType: {
+      type: String,
+      enum: ["user", "custom"],
+      default: "user",
+      index: true,
+    },
     jobId: {
       type: String,
       required: true,
@@ -68,6 +74,7 @@ const noticeEmailDeliverySchema = new mongoose.Schema(
 );
 
 noticeEmailDeliverySchema.index({ notice: 1, user: 1 }, { unique: true });
+noticeEmailDeliverySchema.index({ notice: 1, recipientEmail: 1 }, { unique: true });
 noticeEmailDeliverySchema.index({ notice: 1, status: 1 });
 
 const NoticeEmailDelivery = mongoose.model("NoticeEmailDelivery", noticeEmailDeliverySchema);
