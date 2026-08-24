@@ -4,6 +4,39 @@ export const supportStatuses = ["pending", "dismissed", "resolved"];
 export const supportSenderTypes = ["guest", "user", "superadmin"];
 export const supportMessageStatuses = ["sent", "seen"];
 
+const supportAttachmentSchema = new mongoose.Schema(
+  {
+    key: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    url: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    originalName: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 255,
+    },
+    mimeType: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 100,
+    },
+    size: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
 const supportMessageSchema = new mongoose.Schema(
   {
     senderType: {
@@ -29,9 +62,13 @@ const supportMessageSchema = new mongoose.Schema(
     },
     message: {
       type: String,
-      required: true,
       trim: true,
       maxlength: 1000,
+      default: "",
+    },
+    attachments: {
+      type: [supportAttachmentSchema],
+      default: [],
     },
     sentAt: {
       type: Date,

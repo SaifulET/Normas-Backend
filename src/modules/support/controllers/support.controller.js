@@ -154,6 +154,48 @@ export const deleteSupportConversation = async (req, res, next) => {
   }
 };
 
+export const uploadSupportAttachment = async (req, res, next) => {
+  try {
+    const result = await supportService.uploadSupportAttachment({
+      authUser: req.user,
+      conversationId: req.params.conversationId,
+      file: req.file,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Support attachment uploaded successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteSupportAttachment = async (req, res, next) => {
+  try {
+    const result = await supportService.deleteSupportMessageAttachment({
+      authUser: req.user,
+      conversationId: req.params.conversationId,
+      attachmentKey: req.body.key || req.query.key,
+    });
+
+    req.app.get("io")?.to(`support:${req.params.conversationId}`).emit("support:attachment-deleted", {
+      conversationId: req.params.conversationId,
+      attachmentKey: req.body.key || req.query.key,
+      conversation: result,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Support attachment deleted successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createSupportMessage = async (req, res, next) => {
   try {
     const actor = {
@@ -167,6 +209,7 @@ export const createSupportMessage = async (req, res, next) => {
       conversationId: req.params.conversationId,
       actor,
       message: req.body.message,
+      attachments: req.body.attachments,
     });
 
     req.app.get("io")?.to(result.room).emit("support:message", {

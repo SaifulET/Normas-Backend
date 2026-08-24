@@ -8,6 +8,12 @@ import SupportConversation, {
   supportSenderTypes,
   supportStatuses,
 } from "../models/supportConversation.model.js";
+import {
+  deleteChatAttachmentFromS3,
+  isChatAttachmentKeyForConversation,
+  normalizeChatAttachments,
+  uploadChatAttachmentToS3,
+} from "../../chat-attachments/services/chatAttachmentStorage.service.js";
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
@@ -15,10 +21,10 @@ const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
 const normalizeText = (value) => String(value || "").trim();
 
-const validateMessage = (message, fieldName = "message") => {
+const validateMessage = (message, fieldName = "message", options = {}) => {
   const normalizedMessage = normalizeText(message);
 
-  if (!normalizedMessage) {
+  if (!normalizedMessage && !options.allowEmpty) {
     throw new AppError(`${fieldName} is required`, 400);
   }
 
@@ -60,6 +66,7 @@ const buildMessageResponse = (messageDoc) => ({
   senderName: messageDoc.senderName,
   senderEmail: messageDoc.senderEmail,
   message: messageDoc.message,
+  attachments: messageDoc.attachments || [],
   sentAt: messageDoc.sentAt,
   messageStatus: messageDoc.messageStatus,
   seenAt: messageDoc.seenAt,
@@ -74,6 +81,14 @@ const sortMessagesByTime = (messages = []) =>
   });
 
 const buildConversationRoom = (conversationId) => `support:${conversationId}`;
+
+const assertSupportAttachmentsBelongToConversation = (conversationId, attachments = []) => {
+  attachments.forEach((attachment) => {
+    if (!isChatAttachmentKeyForConversation(attachment.key, { channel: "support", conversationId })) {
+      throw new AppError("Invalid support attachment", 400);
+    }
+  });
+};
 
 const getConversationOrThrow = async (conversationId, withGuestToken = false) => {
   if (!isValidObjectId(conversationId)) {
@@ -443,6 +458,11 @@ export const updateSupportConversationStatus = async (conversationId, status) =>
 
 export const deleteSupportConversation = async (conversationId) => {
   const conversation = await getConversationOrThrow(conversationId);
+  const attachmentKeys = conversation.messages.flatMap((message) =>
+    (message.attachments || []).map((attachment) => attachment.key)
+  );
+
+  await Promise.all(attachmentKeys.map((key) => deleteChatAttachmentFromS3(key)));
 
   await SupportConversation.findByIdAndDelete(conversationId);
 
@@ -452,9 +472,60 @@ export const deleteSupportConversation = async (conversationId) => {
   };
 };
 
-export const createSupportMessage = async ({ conversationId, actor, message }) => {
+export const uploadSupportAttachment = async ({ authUser, conversationId, file }) => {
   const conversation = await getConversationOrThrow(conversationId);
-  const normalizedMessage = validateMessage(message);
+  assertConversationAccess(authUser, conversation);
+
+  return uploadChatAttachmentToS3(file, {
+    channel: "support",
+    conversationId,
+  });
+};
+
+export const deleteSupportMessageAttachment = async ({ authUser, conversationId, attachmentKey }) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  assertConversationAccess(authUser, conversation);
+
+  const normalizedKey = normalizeText(attachmentKey);
+
+  if (!isChatAttachmentKeyForConversation(normalizedKey, { channel: "support", conversationId })) {
+    throw new AppError("Invalid support attachment", 400);
+  }
+
+  const message = conversation.messages.find((messageDoc) =>
+    (messageDoc.attachments || []).some((attachment) => attachment.key === normalizedKey)
+  );
+
+  if (message) {
+    const isSender = message.senderUser && String(message.senderUser) === String(authUser.userId);
+    const canDelete = authUser.role === "superadmin" || isSender;
+
+    if (!canDelete) {
+      throw new AppError("Forbidden: you cannot remove this attachment", 403);
+    }
+  }
+
+  await deleteChatAttachmentFromS3(normalizedKey);
+
+  if (message) {
+    message.attachments = (message.attachments || []).filter((attachment) => attachment.key !== normalizedKey);
+    await conversation.save();
+  }
+
+  return serializeConversation(await getConversationOrThrow(conversation._id));
+};
+
+export const createSupportMessage = async ({ conversationId, actor, message, attachments = [] }) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  const normalizedAttachments = normalizeChatAttachments(attachments);
+  assertSupportAttachmentsBelongToConversation(conversationId, normalizedAttachments);
+  const normalizedMessage = validateMessage(message, "message", {
+    allowEmpty: normalizedAttachments.length > 0,
+  });
+
+  if (!normalizedMessage && normalizedAttachments.length === 0) {
+    throw new AppError("message or attachment is required", 400);
+  }
 
   if (!supportSenderTypes.includes(actor.senderType)) {
     throw new AppError("Invalid senderType", 400);
@@ -466,6 +537,7 @@ export const createSupportMessage = async ({ conversationId, actor, message }) =
     senderName: actor.senderName || "",
     senderEmail: actor.senderEmail || "",
     message: normalizedMessage,
+    attachments: normalizedAttachments,
     sentAt: new Date(),
     messageStatus: "sent",
     seenAt: null,

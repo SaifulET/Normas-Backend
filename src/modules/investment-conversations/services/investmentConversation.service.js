@@ -11,6 +11,12 @@ import InvestmentConversation, {
   investmentConversationStatuses,
 } from "../models/investmentConversation.model.js";
 import MeetingRequest, { meetingRequestStatuses } from "../models/meetingRequest.model.js";
+import {
+  deleteChatAttachmentFromS3,
+  isChatAttachmentKeyForConversation,
+  normalizeChatAttachments,
+  uploadChatAttachmentToS3,
+} from "../../chat-attachments/services/chatAttachmentStorage.service.js";
 
 const allowedConversationRoles = ["investor", "investee", "superadmin"];
 const allowedMeetingDecisionStatuses = ["accepted", "rejected", "cancelled"];
@@ -21,6 +27,14 @@ const userProjection = "name email role profileImage";
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
 const buildConversationRoom = (conversationId) => `investment:${conversationId}`;
+
+const assertInvestmentAttachmentsBelongToConversation = (conversationId, attachments = []) => {
+  attachments.forEach((attachment) => {
+    if (!isChatAttachmentKeyForConversation(attachment.key, { channel: "investment", conversationId })) {
+      throw new AppError("Invalid conversation attachment", 400);
+    }
+  });
+};
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -40,10 +54,10 @@ const validateObjectId = (value, fieldName) => {
   return value;
 };
 
-const validateMessage = (message) => {
+const validateMessage = (message, options = {}) => {
   const normalizedMessage = normalizeText(message);
 
-  if (!normalizedMessage) {
+  if (!normalizedMessage && !options.allowEmpty) {
     throw new AppError("message is required", 400);
   }
 
@@ -54,12 +68,13 @@ const validateMessage = (message) => {
   return normalizedMessage;
 };
 
-const buildModeratedMessageData = ({ authUser, message, receiverUser, sentAt }) => {
+const buildModeratedMessageData = ({ authUser, message, receiverUser, sentAt, attachments = [] }) => {
   if (authUser.role === "superadmin") {
     return {
       senderUser: authUser.userId,
       senderRole: authUser.role,
       message,
+      attachments,
       moderationStatus: "approved",
       moderationReasons: [],
       moderationHiddenFrom: [],
@@ -80,6 +95,7 @@ const buildModeratedMessageData = ({ authUser, message, receiverUser, sentAt }) 
     senderUser: authUser.userId,
     senderRole: authUser.role,
     message,
+    attachments,
     moderationStatus: moderation.status,
     moderationReasons: moderation.reasons,
     moderationHiddenFrom: moderation.restricted && receiverId ? [receiverId] : [],
@@ -404,6 +420,7 @@ const serializeMessage = (message) => ({
   senderUser: serializeUser(message.senderUser),
   senderRole: message.senderRole,
   message: message.message,
+  attachments: message.attachments || [],
   moderationStatus: message.moderationStatus || "approved",
   moderationReasons: message.moderationReasons || [],
   isRestricted: message.moderationStatus === "restricted",
@@ -898,17 +915,77 @@ export const getConversationMessages = async (authUser, conversationId, query = 
   };
 };
 
+export const uploadConversationAttachment = async (authUser, conversationId, file) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  assertConversationAccess(authUser, conversation);
+
+  return uploadChatAttachmentToS3(file, {
+    channel: "investment",
+    conversationId,
+  });
+};
+
+export const deleteConversationAttachment = async (authUser, conversationId, attachmentKey) => {
+  const conversation = await getConversationOrThrow(conversationId);
+  assertConversationAccess(authUser, conversation);
+
+  const normalizedKey = normalizeText(attachmentKey);
+
+  if (!isChatAttachmentKeyForConversation(normalizedKey, { channel: "investment", conversationId })) {
+    throw new AppError("Invalid conversation attachment", 400);
+  }
+
+  const message = conversation.messages.find((messageDoc) =>
+    (messageDoc.attachments || []).some((attachment) => attachment.key === normalizedKey)
+  );
+
+  if (message) {
+    const isSender = getMessageSenderId(message) === String(authUser.userId);
+    const canDelete = authUser.role === "superadmin" || isSender;
+
+    if (!canDelete) {
+      throw new AppError("Forbidden: you cannot remove this attachment", 403);
+    }
+  }
+
+  await deleteChatAttachmentFromS3(normalizedKey);
+
+  if (message) {
+    message.attachments = (message.attachments || []).filter((attachment) => attachment.key !== normalizedKey);
+    await conversation.save();
+  }
+
+  const superadmins = await getSuperadmins();
+  const savedConversation = await getConversationOrThrow(conversation._id);
+
+  return serializeConversation(savedConversation, {
+    authUser,
+    currentUserId: authUser.userId,
+    superadmins,
+  });
+};
+
 export const createConversationMessage = async (authUser, conversationId, payload = {}) => {
   const conversation = await getConversationOrThrow(conversationId);
   assertConversationAccess(authUser, conversation);
 
-  const message = validateMessage(payload.message);
+  const attachments = normalizeChatAttachments(payload.attachments);
+  assertInvestmentAttachmentsBelongToConversation(conversationId, attachments);
+  const message = validateMessage(payload.message, {
+    allowEmpty: attachments.length > 0,
+  });
+
+  if (!message && attachments.length === 0) {
+    throw new AppError("message or attachment is required", 400);
+  }
+
   const sentAt = new Date();
   const receiverUser = getMessageReceiverUser(conversation, authUser.userId);
 
   conversation.messages.push(buildModeratedMessageData({
     authUser,
     message,
+    attachments,
     receiverUser,
     sentAt,
   }));

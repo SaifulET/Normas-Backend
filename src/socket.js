@@ -143,7 +143,7 @@ export const createSocketServer = (httpServer) => {
 
     socket.on("investment:send-message", async (payload = {}, callback = () => {}) => {
       try {
-        const { conversationId, message } = payload;
+        const { attachments, conversationId, message } = payload;
 
         if (
           !socket.data.investmentAuthUser ||
@@ -155,7 +155,7 @@ export const createSocketServer = (httpServer) => {
         const result = await investmentConversationService.createConversationMessage(
           socket.data.investmentAuthUser,
           conversationId,
-          { message }
+          { attachments, message }
         );
 
         await emitInvestmentMessageToRoom(io, result.room, conversationId, result.messageId);
@@ -257,7 +257,7 @@ export const createSocketServer = (httpServer) => {
 
     socket.on("support:send-message", async (payload = {}, callback = () => {}) => {
       try {
-        const { conversationId, message } = payload;
+        const { attachments, conversationId, message } = payload;
 
         if (!socket.data.actor || socket.data.conversationId !== conversationId) {
           throw new AppError("Join the conversation room before sending messages", 403);
@@ -266,6 +266,7 @@ export const createSocketServer = (httpServer) => {
         const result = await createSupportMessage({
           conversationId,
           actor: socket.data.actor,
+          attachments,
           message,
         });
 

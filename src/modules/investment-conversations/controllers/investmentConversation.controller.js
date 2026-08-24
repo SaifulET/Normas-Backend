@@ -203,6 +203,49 @@ export const createConversationMessage = async (req, res, next) => {
   }
 };
 
+export const uploadConversationAttachment = async (req, res, next) => {
+  try {
+    const result = await investmentConversationService.uploadConversationAttachment(
+      req.user,
+      req.params.conversationId,
+      req.file
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Conversation attachment uploaded successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteConversationAttachment = async (req, res, next) => {
+  try {
+    const attachmentKey = req.body.key || req.query.key;
+    const result = await investmentConversationService.deleteConversationAttachment(
+      req.user,
+      req.params.conversationId,
+      attachmentKey
+    );
+
+    emitInvestmentEvent(req, req.params.conversationId, "investment:attachment-deleted", {
+      conversationId: req.params.conversationId,
+      attachmentKey,
+      conversation: result,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Conversation attachment deleted successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createMeetingRequest = async (req, res, next) => {
   try {
     const result = await investmentConversationService.createMeetingRequest(

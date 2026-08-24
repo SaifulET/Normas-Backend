@@ -2,6 +2,7 @@ import express from "express";
 import * as investmentConversationController from "../controllers/investmentConversation.controller.js";
 import { authenticate, authorize } from "../../../middlewares/auth.middleware.js";
 import UserSubscription from "../../pricing/models/subscription.model.js";
+import { chatAttachmentUpload } from "../../../middlewares/chatAttachmentUpload.middleware.js";
 
 const router = express.Router();
 const investeeConversationStatuses = ["active", "cancel_at_period_end"];
@@ -46,6 +47,12 @@ router.patch(
 );
 router.get("/schedules", investmentConversationController.getMySchedules);
 router.get("/schedules/:meetingRequestId", investmentConversationController.getScheduleById);
+router.post(
+  "/:conversationId/attachments",
+  chatAttachmentUpload,
+  investmentConversationController.uploadConversationAttachment
+);
+router.delete("/:conversationId/attachments", investmentConversationController.deleteConversationAttachment);
 router.get("/:conversationId", investmentConversationController.getConversationById);
 router.patch("/:conversationId/seen", investmentConversationController.markConversationAsSeen);
 router.get("/:conversationId/messages", investmentConversationController.getConversationMessages);

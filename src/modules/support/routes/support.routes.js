@@ -1,6 +1,7 @@
 import express from "express";
 import * as supportController from "../controllers/support.controller.js";
 import { authenticate, authorize } from "../../../middlewares/auth.middleware.js";
+import { chatAttachmentUpload } from "../../../middlewares/chatAttachmentUpload.middleware.js";
 
 const router = express.Router();
 
@@ -19,6 +20,17 @@ router.get(
   "/my-messages/:conversationId",
   authorize("investor", "investee", "superadmin"),
   supportController.getMySupportConversationById
+);
+router.post(
+  "/:conversationId/attachments",
+  authorize("investor", "investee", "superadmin"),
+  chatAttachmentUpload,
+  supportController.uploadSupportAttachment
+);
+router.delete(
+  "/:conversationId/attachments",
+  authorize("investor", "investee", "superadmin"),
+  supportController.deleteSupportAttachment
 );
 router.get(
   "/:conversationId",
