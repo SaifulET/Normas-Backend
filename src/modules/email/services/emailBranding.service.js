@@ -29,20 +29,18 @@ const buildBrandHeader = () => {
 
   if (logoUrl) {
     return `
-      <img src="${escapeEmailHtml(logoUrl)}" alt="${escapeEmailHtml(getEmailSenderName())}" width="132" style="display:block;border:0;outline:none;text-decoration:none;max-width:132px;height:auto;" />
+      <img src="${escapeEmailHtml(logoUrl)}" alt="${escapeEmailHtml(getEmailSenderName())}" width="116" style="display:block;border:0;outline:none;text-decoration:none;max-width:116px;height:auto;" />
     `;
   }
 
   return `
-    <div style="font-size:22px;line-height:1;font-weight:800;color:#17213F;letter-spacing:0;">
+    <div style="font-size:20px;line-height:1.2;font-weight:800;color:#17213F;letter-spacing:0;">
       ${escapeEmailHtml(getEmailSenderName())}
     </div>
   `;
 };
 
 const getCompanyName = () => getConfiguredEmail(process.env.EMAIL_COMPANY_NAME) || "Early-N Digital Ltd";
-
-const getCompanyRegistrationNumber = () => getConfiguredEmail(process.env.EMAIL_COMPANY_REG_NO) || "17332643";
 
 const formatWebsiteDisplay = (value) =>
   String(value || "")
@@ -74,68 +72,83 @@ const buildSignatureLogo = () => {
   }
 
   return `
-    <img src="${escapeEmailHtml(signatureLogoUrl)}" alt="${escapeEmailHtml(getEmailSenderName())}" width="104" style="display:block;width:104px;max-width:104px;height:auto;border:0;outline:none;text-decoration:none;margin:22px 0 0 0;" />
+    <img src="${escapeEmailHtml(signatureLogoUrl)}" alt="${escapeEmailHtml(getEmailSenderName())}" width="82" style="display:block;width:82px;max-width:82px;height:auto;border:0;outline:none;text-decoration:none;margin:24px 0 0 0;" />
   `;
 };
 
-const buildLetterheadSection = () => `
-  <tr>
-    <td style="padding:0 32px 30px 32px;">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;background:#FFFFFF;border:1px solid #E3E8F0;">
-        <tr>
-          <td width="45%" valign="top" style="background:#0D1B2A;padding:20px 18px 58px 18px;color:#FFFFFF;">
-            <div style="font-size:26px;line-height:1.1;font-weight:800;color:#FFFFFF;">Early-N <span style="color:#08C8F6;">Digital</span></div>
-            <div style="font-size:15px;line-height:1.4;font-weight:700;color:#08C8F6;margin-top:4px;">Ltd</div>
-            <div style="font-size:12px;line-height:1.5;font-style:italic;color:#08C8F6;margin-top:10px;">Innovating the Digital Future</div>
-          </td>
-          <td width="55%" valign="top" style="background:#2378E7;padding:25px 22px 58px 22px;color:#FFFFFF;text-align:right;">
-            <div style="font-size:16px;line-height:1.2;font-weight:800;letter-spacing:8px;color:#FFFFFF;">DIGITAL</div>
-            <div style="font-size:12px;line-height:1.4;font-weight:700;letter-spacing:8px;color:#08C8F6;margin-top:18px;">SOLUTIONS &amp; UBUNTU</div>
-            <div style="font-size:10px;line-height:1.6;letter-spacing:5px;color:#FFFFFF;margin-top:10px;">Ethical Investment Exchange<br />Platform</div>
-          </td>
-        </tr>
-        <tr>
-          <td colspan="2" style="height:4px;background:#08C8F6;font-size:0;line-height:0;">&nbsp;</td>
-        </tr>
-        <tr>
-          <td colspan="2" style="background:#F3F6FA;padding:14px 12px 62px 12px;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;">
-              <tr>
-                <td width="22%" valign="top" style="font-size:11px;line-height:1.35;color:#52627A;padding-right:8px;"><span style="color:#2378E7;font-weight:700;">T</span>&nbsp; ${escapeEmailHtml(getLetterheadPhone())}</td>
-                <td width="24%" valign="top" style="font-size:11px;line-height:1.35;color:#52627A;padding-right:8px;"><span style="color:#2378E7;font-weight:700;">E</span>&nbsp; ${escapeEmailHtml(getEmailSenderAddress())}</td>
-                <td width="22%" valign="top" style="font-size:11px;line-height:1.35;color:#52627A;padding-right:8px;"><span style="color:#2378E7;font-weight:700;">W</span>&nbsp; <a href="${escapeEmailHtml(getLetterheadWebsiteUrl())}" style="color:#52627A;text-decoration:none;white-space:nowrap;">${escapeEmailHtml(getLetterheadWebsiteDisplay())}</a></td>
-                <td width="32%" valign="top" style="font-size:11px;line-height:1.35;color:#52627A;"><span style="color:#2378E7;font-weight:700;">A</span>&nbsp; ${escapeEmailHtml(getLetterheadAddress())}</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-        <tr>
-          <td colspan="2" style="padding:86px 24px 0 24px;background:#FFFFFF;">
-            <div style="font-size:12px;line-height:1.6;color:#17213F;">Yours sincerely,</div>
-            <div style="font-size:13px;line-height:1.4;font-weight:800;color:#17213F;margin-top:54px;">${escapeEmailHtml(getSignatureName())}</div>
-            <div style="font-size:12px;line-height:1.4;color:#52627A;">${escapeEmailHtml(getSignatureTitle())}</div>
-            <div style="font-size:12px;line-height:1.4;color:#2378E7;margin-top:28px;">${escapeEmailHtml(getCompanyName())}</div>
-            ${buildSignatureLogo()}
-          </td>
-        </tr>
-        <tr>
-          <td colspan="2" style="padding:52px 24px 0 24px;background:#FFFFFF;">
-            <div style="height:3px;background:#08C8F6;font-size:0;line-height:0;">&nbsp;</div>
-          </td>
-        </tr>
-        <tr>
-          <td colspan="2" style="padding:26px 24px 24px 24px;background:#FFFFFF;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;background:#0D1B2A;">
-              <tr>
-                <td style="padding:14px 18px;font-size:10px;line-height:1.4;color:#FFFFFF;font-weight:700;">${escapeEmailHtml(getCompanyName())} <span style="color:#08C8F6;">|</span> <span style="color:#08C8F6;">Reg. No. ${escapeEmailHtml(getCompanyRegistrationNumber())}</span></td>
-                <td align="right" style="padding:14px 18px;font-size:10px;line-height:1.4;color:#667085;">Confidential&nbsp;&nbsp;|&nbsp;&nbsp;Page 1 of 1</td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
+const lucideIconUrl = (name) => `https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/${name}.svg`;
+
+const lucideIcon = (name, fallback) => `
+  <img src="${lucideIconUrl(name)}" width="12" height="12" alt="${fallback}" style="display:inline-block;width:12px;height:12px;border:0;outline:none;text-decoration:none;vertical-align:-2px;margin-right:4px;" />
+`;
+
+const mobileIcon = lucideIcon("smartphone", "&#9742;");
+const mailIcon = lucideIcon("mail", "&#9993;");
+const globeIcon = lucideIcon("globe", "&#9711;");
+const addressIcon = lucideIcon("map-pin", "&#9679;");
+
+const buildContactLink = ({ href, icon, label }) => `
+  <td valign="top" style="font-size:9px;line-height:1.25;color:#174985;padding:8px 4px;">
+    <a href="${escapeEmailHtml(href)}" style="color:#174985;text-decoration:underline;">
+      ${icon}${escapeEmailHtml(label)}
+    </a>
+  </td>
+`;
+
+const buildBusinessCard = () => `
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:28px;border:1px solid #DDE5F0;background:#FFFFFF;">
+    <tr>
+      <td width="45%" valign="top" style="background:#0D1B2A;padding:17px 16px 30px 16px;color:#FFFFFF;">
+        <div style="font-size:21px;line-height:1.05;font-weight:800;color:#FFFFFF;">Early-N <span style="color:#08C8F6;">Digital</span></div>
+        <div style="font-size:13px;line-height:1.2;font-weight:700;color:#08C8F6;">Ltd</div>
+        <div style="font-size:9px;line-height:1.4;font-style:italic;color:#08C8F6;margin-top:13px;">Innovating the Digital Future</div>
+      </td>
+      <td width="55%" valign="top" style="background:#2378E7;padding:19px 20px 30px 20px;color:#FFFFFF;text-align:right;">
+        <div style="font-size:13px;line-height:1.1;font-weight:800;letter-spacing:7px;color:#FFFFFF;">DIGITAL</div>
+        <div style="font-size:10px;line-height:1.35;font-weight:700;letter-spacing:6px;color:#08C8F6;margin-top:14px;">SOLUTIONS &amp;<br />UBUNTU</div>
+        <div style="font-size:9px;line-height:1.55;font-weight:700;letter-spacing:3px;color:#FFFFFF;margin-top:8px;">Ethical Investment Exchange<br />Platform</div>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2" style="height:4px;background:#08C8F6;font-size:0;line-height:0;">&nbsp;</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="background:#F3F6FA;padding:0 8px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;">
+          <tr>
+            ${buildContactLink({
+              href: `tel:${getLetterheadPhone().replace(/\s+/g, "")}`,
+              icon: mobileIcon,
+              label: getLetterheadPhone(),
+            })}
+            ${buildContactLink({
+              href: `mailto:${getEmailSenderAddress()}`,
+              icon: mailIcon,
+              label: getEmailSenderAddress(),
+            })}
+            ${buildContactLink({
+              href: getLetterheadWebsiteUrl(),
+              icon: globeIcon,
+              label: getLetterheadWebsiteDisplay(),
+            })}
+            ${buildContactLink({
+              href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(getLetterheadAddress())}`,
+              icon: addressIcon,
+              label: getLetterheadAddress(),
+            })}
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+`;
+
+const buildEmailSignature = () => `
+  <div style="font-size:11px;line-height:1.7;color:#17213F;margin-top:56px;">Yours sincerely,</div>
+  <div style="font-size:12px;line-height:1.4;font-weight:800;color:#17213F;margin-top:46px;">${escapeEmailHtml(getSignatureName())}</div>
+  <div style="font-size:11px;line-height:1.5;color:#52627A;">${escapeEmailHtml(getSignatureTitle())}</div>
+  <div style="font-size:11px;line-height:1.5;color:#2378E7;margin-top:22px;">${escapeEmailHtml(getCompanyName())}</div>
+  ${buildSignatureLogo()}
 `;
 
 export const wrapBrandedEmail = ({ title, previewText = "", bodyHtml }) => `
@@ -152,26 +165,20 @@ export const wrapBrandedEmail = ({ title, previewText = "", bodyHtml }) => `
       </div>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#F4F7FB;">
         <tr>
-          <td align="center" style="padding:32px 16px;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;max-width:640px;background:#FFFFFF;border:1px solid #DEE5F0;border-radius:8px;overflow:hidden;">
+          <td align="center" style="padding:0 16px 32px 16px;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;max-width:510px;background:#FFFFFF;">
               <tr>
-                <td style="height:6px;background:#243B5A;font-size:0;line-height:0;">&nbsp;</td>
+                <td style="height:4px;background:#17213F;font-size:0;line-height:0;">&nbsp;</td>
               </tr>
               <tr>
-                <td style="padding:30px 32px 12px 32px;">
-                  ${buildBrandHeader()}
+                <td style="padding:22px 27px 40px 27px;">
+                  <div style="margin-bottom:8px;">${buildBrandHeader()}</div>
+                  <div>${bodyHtml}</div>
+                  ${buildEmailSignature()}
+                  ${buildBusinessCard()}
                 </td>
               </tr>
-              <tr>
-                <td style="padding:0 32px 28px 32px;">
-                  ${bodyHtml}
-                </td>
-              </tr>
-              ${buildLetterheadSection()}
             </table>
-            <div style="max-width:640px;margin:16px auto 0 auto;font-size:12px;line-height:1.5;color:#667085;text-align:center;">
-              This email was sent by ${escapeEmailHtml(getEmailSenderName())}.
-            </div>
           </td>
         </tr>
       </table>

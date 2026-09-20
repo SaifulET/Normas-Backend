@@ -120,14 +120,19 @@ const sendOtpEmail = async (email, otp, name) => {
   const expiresInMinutes = process.env.OTP_EXPIRES_IN_MINUTES || 10;
   const replyTo = getEmailReplyTo();
   const envelopeFrom = getSmtpEnvelopeFrom();
+  const spacedOtp = String(otp).split("").join(" ");
   const bodyHtml = `
-    <p style="margin:0 0 14px 0;font-size:14px;line-height:1.7;color:#52627A;">Hello ${escapeEmailHtml(name)},</p>
-    <h1 style="margin:0 0 12px 0;font-size:24px;line-height:1.25;color:#17213F;">Password reset request</h1>
-    <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:#52627A;">Use this OTP to continue resetting your password.</p>
-    <div style="margin:0 0 20px 0;padding:18px 20px;background:#F4F7FB;border:1px solid #DEE5F0;border-radius:8px;text-align:center;">
-      <div style="font-size:34px;line-height:1;font-weight:800;letter-spacing:8px;color:#17213F;">${escapeEmailHtml(otp)}</div>
-    </div>
-    <p style="margin:0;font-size:13px;line-height:1.7;color:#667085;">This OTP will expire in ${escapeEmailHtml(expiresInMinutes)} minutes. If you did not request this, you can ignore this email.</p>
+    <div style="font-size:12px;line-height:1.5;color:#51627C;">Hello ${escapeEmailHtml(name || "there")},</div>
+    <h1 style="margin:14px 0 12px 0;font-size:20px;line-height:1.25;color:#17213F;font-weight:800;">Password reset request</h1>
+    <div style="font-size:13px;line-height:1.7;color:#51627C;">Use this OTP to continue resetting your password.</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;margin-top:16px;margin-bottom:16px;border:1px solid #D8E0EC;border-radius:6px;width:100%;background:#F5F7FB;">
+      <tr>
+        <td align="center" style="font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1;font-weight:800;color:#17213F;letter-spacing:8px;padding:17px 12px;">
+          ${escapeEmailHtml(spacedOtp)}
+        </td>
+      </tr>
+    </table>
+    <div style="font-size:11px;line-height:1.6;color:#667085;">This OTP will expire in ${escapeEmailHtml(expiresInMinutes)} minutes. If you did not request this, you can ignore this email.</div>
   `;
 
   const subject = "Password Reset OTP";

@@ -936,21 +936,21 @@ const buildNoticeEmail = ({ notice, user }) => {
   const message = sanitizeNoticeHtml(notice.message);
   const textMessage = stripHtml(notice.message);
   const imageHtml = notice.image?.url
-    ? `<img src="${escapeHtml(notice.image.url)}" alt="" style="display:block;width:100%;max-width:560px;border-radius:12px;margin:20px 0;" />`
+    ? `<img src="${escapeHtml(notice.image.url)}" alt="" style="display:block;width:100%;max-width:456px;border-radius:8px;margin:20px 0;border:1px solid #D8E0EC;" />`
     : "";
   const actionHtml = canOpenDashboardNotice
     ? `
       <p style="margin:24px 0 0 0;">
-        <a href="${escapeHtml(noticeEntryUrl)}" style="display:inline-block;background:#314B6B;color:#fff;text-decoration:none;border-radius:8px;padding:11px 18px;font-weight:700;">Open notice</a>
+        <a href="${escapeHtml(noticeEntryUrl)}" style="display:inline-block;background:#314B6B;color:#FFFFFF;text-decoration:none;border-radius:8px;padding:11px 18px;font-size:13px;font-weight:700;">Open notice</a>
       </p>
     `
     : "";
 
   const bodyHtml = `
-    <p style="margin:0 0 14px 0;font-size:14px;line-height:1.7;color:#52627A;">Hello ${escapeHtml(user.name || "there")},</p>
-    <h1 style="margin:0 0 14px 0;font-size:24px;line-height:1.25;color:#17213F;">${title}</h1>
+    <p style="margin:0 0 14px 0;font-size:12px;line-height:1.5;color:#51627C;">Hello ${escapeHtml(user.name || "there")},</p>
+    <h1 style="margin:0 0 14px 0;font-size:20px;line-height:1.25;color:#17213F;font-weight:800;">${title}</h1>
     ${imageHtml}
-    <div style="font-size:15px;line-height:1.7;color:#344054;">${message}</div>
+    <div style="font-size:13px;line-height:1.7;color:#344054;">${message}</div>
     ${actionHtml}
   `;
 
