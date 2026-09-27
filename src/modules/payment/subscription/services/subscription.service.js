@@ -583,7 +583,7 @@ export const createCheckoutSession = async (authUser, payload = {}) => {
   try {
     session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      ui_mode: "embedded",
+      ui_mode: "embedded_page",
       payment_method_types: ["card"],
       redirect_on_completion: "never",
       customer: stripeCustomerId,
@@ -595,9 +595,8 @@ export const createCheckoutSession = async (authUser, payload = {}) => {
         },
       ],
       allow_promotion_codes: true,
-      billing_address_collection: "required",
+      billing_address_collection: "auto",
       customer_update: {
-        address: "auto",
         name: "auto",
       },
       metadata,

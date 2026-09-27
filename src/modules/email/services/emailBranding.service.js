@@ -24,23 +24,10 @@ export const getEmailReplyTo = () => getConfiguredEmail(process.env.EMAIL_REPLY_
 
 export const getSmtpEnvelopeFrom = () => getConfiguredEmail(process.env.EMAIL_ENVELOPE_FROM, process.env.SMTP_USER);
 
-const buildBrandHeader = () => {
-  const logoUrl = getConfiguredEmail(process.env.EMAIL_LOGO_URL);
-
-  if (logoUrl) {
-    return `
-      <img src="${escapeEmailHtml(logoUrl)}" alt="${escapeEmailHtml(getEmailSenderName())}" width="116" style="display:block;border:0;outline:none;text-decoration:none;max-width:116px;height:auto;" />
-    `;
-  }
-
-  return `
-    <div style="font-size:20px;line-height:1.2;font-weight:800;color:#17213F;letter-spacing:0;">
-      ${escapeEmailHtml(getEmailSenderName())}
-    </div>
-  `;
-};
-
 const getCompanyName = () => getConfiguredEmail(process.env.EMAIL_COMPANY_NAME) || "Early-N Digital Ltd";
+
+const getCompanyRegistrationNumber = () =>
+  getConfiguredEmail(process.env.EMAIL_COMPANY_REGISTRATION_NUMBER) || "Reg. No. 17332643";
 
 const formatWebsiteDisplay = (value) =>
   String(value || "")
@@ -87,55 +74,68 @@ const mailIcon = lucideIcon("mail", "&#9993;");
 const globeIcon = lucideIcon("globe", "&#9711;");
 const addressIcon = lucideIcon("map-pin", "&#9679;");
 
-const buildContactLink = ({ href, icon, label }) => `
-  <td valign="top" style="font-size:9px;line-height:1.25;color:#174985;padding:8px 4px;">
-    <a href="${escapeEmailHtml(href)}" style="color:#174985;text-decoration:underline;">
+const buildContactLink = ({ href, icon, label, width }) => `
+  <td width="${escapeEmailHtml(width)}" valign="top" style="font-size:12px;line-height:1.35;color:#0058FF;padding:0 14px 10px 0;white-space:normal;word-break:normal;overflow-wrap:normal;">
+    <a href="${escapeEmailHtml(href)}" style="color:#0058FF;text-decoration:none;">
       ${icon}${escapeEmailHtml(label)}
     </a>
   </td>
 `;
 
+const buildAddressLink = () => `
+  <td colspan="3" valign="top" style="font-size:12px;line-height:1.35;color:#17213F;padding:0 14px 0 0;white-space:normal;word-break:normal;overflow-wrap:normal;">
+    <a href="${escapeEmailHtml(
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(getLetterheadAddress())}`
+    )}" style="color:#17213F;text-decoration:none;">
+      ${addressIcon}${escapeEmailHtml(getLetterheadAddress())}
+    </a>
+  </td>
+`;
+
 const buildBusinessCard = () => `
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:28px;border:1px solid #DDE5F0;background:#FFFFFF;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:36px;background:#FFFFFF;">
     <tr>
-      <td width="45%" valign="top" style="background:#0D1B2A;padding:17px 16px 30px 16px;color:#FFFFFF;">
-        <div style="font-size:21px;line-height:1.05;font-weight:800;color:#FFFFFF;">Early-N <span style="color:#08C8F6;">Digital</span></div>
-        <div style="font-size:13px;line-height:1.2;font-weight:700;color:#08C8F6;">Ltd</div>
-        <div style="font-size:9px;line-height:1.4;font-style:italic;color:#08C8F6;margin-top:13px;">Innovating the Digital Future</div>
+      <td width="46%" valign="top" style="background:#0D1B2A;padding:25px 20px 26px 20px;color:#FFFFFF;">
+        <div style="font-size:20px;line-height:1.05;font-weight:800;color:#FFFFFF;">Early-N <span style="color:#08C8F6;">Digital</span></div>
+        <div style="font-size:12px;line-height:1.2;font-weight:700;color:#FFFFFF;text-transform:uppercase;">Ltd</div>
+        <div style="font-size:11px;line-height:1.4;font-style:italic;color:#FFFFFF;margin-top:13px;">Innovating the Digital Future</div>
       </td>
-      <td width="55%" valign="top" style="background:#2378E7;padding:19px 20px 30px 20px;color:#FFFFFF;text-align:right;">
-        <div style="font-size:13px;line-height:1.1;font-weight:800;letter-spacing:7px;color:#FFFFFF;">DIGITAL</div>
-        <div style="font-size:10px;line-height:1.35;font-weight:700;letter-spacing:6px;color:#08C8F6;margin-top:14px;">SOLUTIONS &amp;<br />UBUNTU</div>
-        <div style="font-size:9px;line-height:1.55;font-weight:700;letter-spacing:3px;color:#FFFFFF;margin-top:8px;">Ethical Investment Exchange<br />Platform</div>
+      <td width="54%" valign="top" style="background:#2378E7;padding:25px 24px 26px 20px;color:#FFFFFF;text-align:right;">
+        <div style="font-size:16px;line-height:1.1;font-weight:800;letter-spacing:6px;color:#FFFFFF;">DIGITAL</div>
+        <div style="font-size:10px;line-height:1.35;font-weight:700;letter-spacing:4px;color:#D7F7FF;margin-top:18px;">SOLUTIONS &amp; UBUNTU</div>
+        <div style="font-size:12px;line-height:1.45;font-weight:700;color:#FFFFFF;margin-top:4px;">Ethical Investment Exchange Platform</div>
       </td>
     </tr>
     <tr>
       <td colspan="2" style="height:4px;background:#08C8F6;font-size:0;line-height:0;">&nbsp;</td>
     </tr>
+  </table>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;background:#FFFFFF;">
     <tr>
-      <td colspan="2" style="background:#F3F6FA;padding:0 8px;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;">
+      <td style="padding:24px 40px 0 40px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;table-layout:fixed;">
           <tr>
             ${buildContactLink({
               href: `tel:${getLetterheadPhone().replace(/\s+/g, "")}`,
               icon: mobileIcon,
               label: getLetterheadPhone(),
+              width: "28%",
             })}
             ${buildContactLink({
               href: `mailto:${getEmailSenderAddress()}`,
               icon: mailIcon,
               label: getEmailSenderAddress(),
+              width: "36%",
             })}
             ${buildContactLink({
               href: getLetterheadWebsiteUrl(),
               icon: globeIcon,
               label: getLetterheadWebsiteDisplay(),
+              width: "36%",
             })}
-            ${buildContactLink({
-              href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(getLetterheadAddress())}`,
-              icon: addressIcon,
-              label: getLetterheadAddress(),
-            })}
+          </tr>
+          <tr>
+            ${buildAddressLink()}
           </tr>
         </table>
       </td>
@@ -144,11 +144,13 @@ const buildBusinessCard = () => `
 `;
 
 const buildEmailSignature = () => `
-  <div style="font-size:11px;line-height:1.7;color:#17213F;margin-top:56px;">Yours sincerely,</div>
-  <div style="font-size:12px;line-height:1.4;font-weight:800;color:#17213F;margin-top:46px;">${escapeEmailHtml(getSignatureName())}</div>
-  <div style="font-size:11px;line-height:1.5;color:#52627A;">${escapeEmailHtml(getSignatureTitle())}</div>
-  <div style="font-size:11px;line-height:1.5;color:#2378E7;margin-top:22px;">${escapeEmailHtml(getCompanyName())}</div>
+  <div style="font-size:14px;line-height:1.7;color:#000000;margin-top:34px;">Yours sincerely,</div>
+  <div style="height:1px;background:#E5E7EB;font-size:0;line-height:0;margin:16px 0 18px 0;">&nbsp;</div>
+  <div style="font-size:16px;line-height:1.35;font-weight:800;color:#00143A;">${escapeEmailHtml(getSignatureName())}</div>
+  <div style="font-size:14px;line-height:1.35;color:#17213F;">${escapeEmailHtml(getSignatureTitle())}</div>
+  <div style="font-size:14px;line-height:1.5;font-weight:700;color:#0058FF;margin-top:8px;">${escapeEmailHtml(getCompanyName())}</div>
   ${buildSignatureLogo()}
+  <div style="font-size:11px;line-height:1.45;color:#7A8699;margin-top:14px;">${escapeEmailHtml(getCompanyRegistrationNumber())}</div>
 `;
 
 export const wrapBrandedEmail = ({ title, previewText = "", bodyHtml }) => `
@@ -166,13 +168,14 @@ export const wrapBrandedEmail = ({ title, previewText = "", bodyHtml }) => `
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#F4F7FB;">
         <tr>
           <td align="center" style="padding:0 16px 32px 16px;">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;max-width:510px;background:#FFFFFF;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;max-width:636px;background:#FFFFFF;">
               <tr>
-                <td style="height:4px;background:#17213F;font-size:0;line-height:0;">&nbsp;</td>
+                <td style="background:#0D1B2A;padding:12px 36px;font-size:14px;line-height:1.2;color:#FFFFFF;">
+                  <span style="color:#2B83FF;">Early-N</span> <span style="font-weight:800;color:#FFFFFF;">Digital Ltd</span>
+                </td>
               </tr>
               <tr>
-                <td style="padding:22px 27px 40px 27px;">
-                  <div style="margin-bottom:8px;">${buildBrandHeader()}</div>
+                <td style="padding:38px 40px 34px 40px;">
                   <div>${bodyHtml}</div>
                   ${buildEmailSignature()}
                   ${buildBusinessCard()}
