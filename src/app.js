@@ -20,6 +20,10 @@ import adminAnalyticsRoutes from "./modules/analytics/routes/adminAnalytics.rout
 import notificationRoutes from "./modules/notification/routes/notification.routes.js";
 import moderationRoutes from "./modules/moderation/routes/moderation.routes.js";
 import {
+  publicBlogRouter,
+  superadminBlogRouter,
+} from "./modules/blog/routes/blog.routes.js";
+import {
   investeeNoticeRouter,
   investorNoticeRouter,
   superadminNoticeRouter,
@@ -71,6 +75,8 @@ app.use("/api/v1/admin/users", adminUserRoutes);
 app.use("/api/v1/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/v1/notifications", notificationRoutes);
 app.use("/api/v1/moderation", moderationRoutes);
+app.use("/api/v1/blogs", publicBlogRouter);
+app.use("/api/v1/super-admin/blogs", superadminBlogRouter);
 app.use("/api/v1/super-admin/notices", superadminNoticeRouter);
 app.use("/api/v1/investor/notices", investorNoticeRouter);
 app.use("/api/v1/investee/notices", investeeNoticeRouter);
