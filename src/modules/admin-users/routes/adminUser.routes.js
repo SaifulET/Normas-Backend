@@ -13,5 +13,7 @@ router.get("/:userId/kyc", adminUserController.getAdminUserKyc);
 router.get("/:userId/pitches", adminUserController.getAdminUserPitches);
 router.get("/:userId/features", adminUserController.getAdminUserPitches);
 router.patch("/:userId/status", adminUserController.updateAdminUserAccountStatus);
+router.delete("/bulk", adminUserController.deleteAdminUsers);
+router.delete("/:userId", adminUserController.deleteAdminUser);
 
 export default router;

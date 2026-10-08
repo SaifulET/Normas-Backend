@@ -53,6 +53,7 @@ router.post(
   investmentConversationController.uploadConversationAttachment
 );
 router.delete("/:conversationId/attachments", investmentConversationController.deleteConversationAttachment);
+router.delete("/:conversationId", investmentConversationController.deleteConversation);
 router.get("/:conversationId", investmentConversationController.getConversationById);
 router.patch("/:conversationId/seen", investmentConversationController.markConversationAsSeen);
 router.get("/:conversationId/messages", investmentConversationController.getConversationMessages);

@@ -965,6 +965,28 @@ export const deleteConversationAttachment = async (authUser, conversationId, att
   });
 };
 
+export const deleteConversation = async (authUser, conversationId) => {
+  if (authUser.role !== "superadmin") {
+    throw new AppError("Forbidden: only superadmin can delete conversations", 403);
+  }
+
+  const conversation = await getConversationOrThrow(conversationId);
+  const attachmentKeys = conversation.messages.flatMap((message) =>
+    (message.attachments || []).map((attachment) => attachment.key)
+  );
+
+  await Promise.all(attachmentKeys.map((key) => deleteChatAttachmentFromS3(key)));
+  await Promise.all([
+    MeetingRequest.deleteMany({ conversation: conversation._id }),
+    InvestmentConversation.findByIdAndDelete(conversation._id),
+  ]);
+
+  return {
+    id: conversation._id,
+    message: "Investment conversation deleted successfully",
+  };
+};
+
 export const createConversationMessage = async (authUser, conversationId, payload = {}) => {
   const conversation = await getConversationOrThrow(conversationId);
   assertConversationAccess(authUser, conversation);

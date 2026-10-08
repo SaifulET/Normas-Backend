@@ -86,3 +86,31 @@ export const updateAdminUserAccountStatus = async (req, res, next) => {
     next(error);
   }
 };
+
+export const deleteAdminUser = async (req, res, next) => {
+  try {
+    const result = await adminUserService.deleteAdminUser(req.params.userId);
+
+    res.status(200).json({
+      success: true,
+      message: "Admin user deleted successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteAdminUsers = async (req, res, next) => {
+  try {
+    const result = await adminUserService.deleteAdminUsers(req.body.userIds);
+
+    res.status(200).json({
+      success: true,
+      message: "Admin users deleted successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

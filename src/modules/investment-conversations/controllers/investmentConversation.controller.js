@@ -246,6 +246,27 @@ export const deleteConversationAttachment = async (req, res, next) => {
   }
 };
 
+export const deleteConversation = async (req, res, next) => {
+  try {
+    const result = await investmentConversationService.deleteConversation(
+      req.user,
+      req.params.conversationId
+    );
+
+    emitInvestmentEvent(req, req.params.conversationId, "investment:conversation-deleted", {
+      conversationId: req.params.conversationId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Investment conversation deleted successfully",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createMeetingRequest = async (req, res, next) => {
   try {
     const result = await investmentConversationService.createMeetingRequest(

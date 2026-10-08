@@ -55,6 +55,18 @@ const assertTargetUserId = (userId) => {
   }
 };
 
+const normalizeUserIds = (userIds) => {
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    throw new AppError("userIds must be a non-empty array", 400);
+  }
+
+  const uniqueIds = [...new Set(userIds.map((userId) => normalizeText(userId)).filter(Boolean))];
+
+  uniqueIds.forEach(assertTargetUserId);
+
+  return uniqueIds;
+};
+
 const buildUsersQuery = (query = {}) => {
   const filters = {
     role: {
@@ -324,4 +336,66 @@ export const updateAdminUserAccountStatus = async (userId, accountStatus) => {
     kyc,
     pitchCount: await List.countDocuments({ user: user._id }),
   });
+};
+
+export const deleteAdminUser = async (userId) => {
+  assertTargetUserId(userId);
+
+  const user = await User.findOneAndDelete({
+    _id: userId,
+    role: {
+      $in: userRoles,
+    },
+  }).lean();
+
+  if (!user) {
+    throw new AppError("Investor or investee user not found", 404);
+  }
+
+  await Kyc.deleteMany({ user: user._id });
+
+  return {
+    id: user._id,
+    message: "User deleted successfully",
+  };
+};
+
+export const deleteAdminUsers = async (userIds) => {
+  const normalizedIds = normalizeUserIds(userIds);
+  const users = await User.find({
+    _id: {
+      $in: normalizedIds,
+    },
+    role: {
+      $in: userRoles,
+    },
+  }).select("_id").lean();
+
+  if (users.length === 0) {
+    throw new AppError("Investor or investee users not found", 404);
+  }
+
+  const foundIds = users.map((user) => user._id);
+
+  await Promise.all([
+    User.deleteMany({
+      _id: {
+        $in: foundIds,
+      },
+      role: {
+        $in: userRoles,
+      },
+    }),
+    Kyc.deleteMany({
+      user: {
+        $in: foundIds,
+      },
+    }),
+  ]);
+
+  return {
+    deletedCount: foundIds.length,
+    ids: foundIds,
+    message: "Users deleted successfully",
+  };
 };
