@@ -11,6 +11,7 @@ import {
   wrapBrandedEmail,
 } from "../../email/services/emailBranding.service.js";
 import { notifyUserRegistered } from "../../notification/services/notification.service.js";
+import PendingSuperadminSignup from "../models/pendingSuperadminSignup.model.js";
 import User from "../models/user.model.js";
 
 let cachedOtpSesClient = null;
@@ -18,7 +19,7 @@ let cachedOtpSesClient = null;
 const generateOtp = () => Math.floor(1000 + Math.random() * 9000).toString();
 
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
-const SUPERADMIN_SIGNUP_EMAIL = "info@earlyn.com";
+const SUPERADMIN_APPROVAL_EMAIL = "info@earlyn.com";
 
 const getAuthEmailProvider = () => {
   const provider = (process.env.AUTH_EMAIL_PROVIDER || process.env.EMAIL_PROVIDER || "smtp").trim().toLowerCase();
@@ -76,14 +77,12 @@ const validateSignupPayload = ({ name, role, email, password }) => {
   }
 };
 
-const validateSuperadminSignup = ({ role, email }) => {
+const validateSuperadminSignup = ({ role }) => {
   if (role !== "superadmin") {
     return;
   }
 
-  if (email !== SUPERADMIN_SIGNUP_EMAIL) {
-    throw new AppError("Superadmin signup is restricted to the authorized admin email", 403);
-  }
+  throw new AppError("Use the superadmin verification signup flow", 400);
 };
 
 const validateSigninPayload = ({ email, password }) => {
@@ -127,15 +126,19 @@ const buildAuthResponse = (user, accessToken, refreshToken) => ({
   refreshToken,
 });
 
-const sendOtpEmail = async (email, otp, name) => {
+const sendOtpEmail = async (email, otp, name, options = {}) => {
   const expiresInMinutes = process.env.OTP_EXPIRES_IN_MINUTES || 10;
   const replyTo = getEmailReplyTo();
   const envelopeFrom = getSmtpEnvelopeFrom();
   const spacedOtp = String(otp).split("").join(" ");
+  const subject = options.subject || "Password Reset OTP";
+  const heading = options.heading || "Password reset request";
+  const intro = options.intro || "Use this OTP to continue resetting your password.";
+  const previewText = options.previewText || "Use your Early-N password reset OTP to continue.";
   const bodyHtml = `
     <div style="font-size:12px;line-height:1.5;color:#51627C;">Hello ${escapeEmailHtml(name || "there")},</div>
-    <h1 style="margin:14px 0 12px 0;font-size:20px;line-height:1.25;color:#17213F;font-weight:800;">Password reset request</h1>
-    <div style="font-size:13px;line-height:1.7;color:#51627C;">Use this OTP to continue resetting your password.</div>
+    <h1 style="margin:14px 0 12px 0;font-size:20px;line-height:1.25;color:#17213F;font-weight:800;">${escapeEmailHtml(heading)}</h1>
+    <div style="font-size:13px;line-height:1.7;color:#51627C;">${escapeEmailHtml(intro)}</div>
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;margin-top:16px;margin-bottom:16px;border:1px solid #D8E0EC;border-radius:6px;width:100%;background:#F5F7FB;">
       <tr>
         <td align="center" style="font-family:Arial,Helvetica,sans-serif;font-size:28px;line-height:1;font-weight:800;color:#17213F;letter-spacing:8px;padding:17px 12px;">
@@ -146,17 +149,16 @@ const sendOtpEmail = async (email, otp, name) => {
     <div style="font-size:11px;line-height:1.6;color:#667085;">This OTP will expire in ${escapeEmailHtml(expiresInMinutes)} minutes. If you did not request this, you can ignore this email.</div>
   `;
 
-  const subject = "Password Reset OTP";
   const html = wrapBrandedEmail({
     title: subject,
-    previewText: "Use your Early-N password reset OTP to continue.",
+    previewText,
     bodyHtml,
   });
   const text = [
     `Hello ${name || "there"},`,
     "",
-    "Password reset request",
-    `Your password reset OTP is: ${otp}`,
+    heading,
+    `Your OTP is: ${otp}`,
     `This OTP will expire in ${expiresInMinutes} minutes.`,
   ].join("\n");
 
@@ -204,8 +206,8 @@ const sendOtpEmail = async (email, otp, name) => {
       throw error;
     }
 
-    console.error("Password reset OTP email failed:", error.message);
-    throw new AppError("Unable to send password reset OTP email. Please try again later.", 502);
+    console.error("OTP email failed:", error.message);
+    throw new AppError("Unable to send OTP email. Please try again later.", 502);
   }
 };
 
@@ -213,7 +215,7 @@ export const signup = async ({ name, role, email, password }) => {
   validateSignupPayload({ name, role, email, password });
 
   const normalizedEmail = normalizeEmail(email);
-  validateSuperadminSignup({ role, email: normalizedEmail });
+  validateSuperadminSignup({ role });
 
   const existingUser = await User.findOne({ email: normalizedEmail });
 
@@ -235,6 +237,99 @@ export const signup = async ({ name, role, email, password }) => {
 
   user.refreshToken = refreshToken;
   await user.save();
+  await notifyUserRegistered(user);
+
+  return buildAuthResponse(user, accessToken, refreshToken);
+};
+
+export const requestSuperadminSignup = async ({ name, email, password }) => {
+  validateSignupPayload({ name, role: "superadmin", email, password });
+
+  const normalizedEmail = normalizeEmail(email);
+  const existingUser = await User.findOne({ email: normalizedEmail });
+
+  if (existingUser) {
+    throw new AppError("User already exists with this email", 409);
+  }
+
+  const otp = generateOtp();
+  const expiresInMinutes = Number(process.env.OTP_EXPIRES_IN_MINUTES || 10);
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  await PendingSuperadminSignup.findOneAndUpdate(
+    { email: normalizedEmail },
+    {
+      name,
+      email: normalizedEmail,
+      password: hashedPassword,
+      otp,
+      otpExpiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000),
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  await sendOtpEmail(SUPERADMIN_APPROVAL_EMAIL, otp, "Superadmin", {
+    subject: "Superadmin Signup Verification Code",
+    heading: "Superadmin signup approval",
+    intro: `${normalizedEmail} requested superadmin access. Share this OTP only if you approve this signup.`,
+    previewText: "Use this Early-N OTP to approve a superadmin signup.",
+  });
+
+  return {
+    email: normalizedEmail,
+    message: `Verification code sent to ${SUPERADMIN_APPROVAL_EMAIL}`,
+  };
+};
+
+export const verifySuperadminSignup = async ({ email, otp }) => {
+  if (!email || !otp) {
+    throw new AppError("Email and OTP are required", 400);
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedOtp = String(otp).trim();
+
+  if (!/^\d{4}$/.test(normalizedOtp)) {
+    throw new AppError("OTP must be a 4 digit number", 400);
+  }
+
+  const pendingSignup = await PendingSuperadminSignup.findOne({ email: normalizedEmail }).select(
+    "+password +otp +otpExpiresAt"
+  );
+
+  if (!pendingSignup) {
+    throw new AppError("Please request a new superadmin signup verification code", 400);
+  }
+
+  if (pendingSignup.otpExpiresAt.getTime() < Date.now()) {
+    await PendingSuperadminSignup.deleteOne({ _id: pendingSignup._id });
+    throw new AppError("OTP has expired", 400);
+  }
+
+  if (pendingSignup.otp !== normalizedOtp) {
+    throw new AppError("Invalid OTP", 400);
+  }
+
+  const existingUser = await User.findOne({ email: normalizedEmail });
+
+  if (existingUser) {
+    await PendingSuperadminSignup.deleteOne({ _id: pendingSignup._id });
+    throw new AppError("User already exists with this email", 409);
+  }
+
+  const user = await User.create({
+    name: pendingSignup.name,
+    role: "superadmin",
+    email: pendingSignup.email,
+    password: pendingSignup.password,
+  });
+
+  const accessToken = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+
+  user.refreshToken = refreshToken;
+  await user.save();
+  await PendingSuperadminSignup.deleteOne({ _id: pendingSignup._id });
   await notifyUserRegistered(user);
 
   return buildAuthResponse(user, accessToken, refreshToken);

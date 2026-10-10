@@ -8,6 +8,8 @@ const router = express.Router();
 
 router.post("/signup", authController.signup);
 router.post("/signin", authController.signin);
+router.post("/superadmin/signup/request", authController.requestSuperadminSignup);
+router.post("/superadmin/signup/verify", authController.verifySuperadminSignup);
 router.post("/refresh-token", authController.refreshToken);
 router.post("/logout", authenticate, authController.logout);
 router.post("/forgot-password", authController.forgotPassword);
