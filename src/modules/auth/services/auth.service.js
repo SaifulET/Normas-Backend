@@ -18,6 +18,7 @@ let cachedOtpSesClient = null;
 const generateOtp = () => Math.floor(1000 + Math.random() * 9000).toString();
 
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+const SUPERADMIN_SIGNUP_EMAIL = "info@earlyn.com";
 
 const getAuthEmailProvider = () => {
   const provider = (process.env.AUTH_EMAIL_PROVIDER || process.env.EMAIL_PROVIDER || "smtp").trim().toLowerCase();
@@ -72,6 +73,16 @@ const getOtpEmailTransporter = () => {
 const validateSignupPayload = ({ name, role, email, password }) => {
   if (!name || !role || !email || !password) {
     throw new AppError("Name, role, email and password are required", 400);
+  }
+};
+
+const validateSuperadminSignup = ({ role, email }) => {
+  if (role !== "superadmin") {
+    return;
+  }
+
+  if (email !== SUPERADMIN_SIGNUP_EMAIL) {
+    throw new AppError("Superadmin signup is restricted to the authorized admin email", 403);
   }
 };
 
@@ -202,6 +213,8 @@ export const signup = async ({ name, role, email, password }) => {
   validateSignupPayload({ name, role, email, password });
 
   const normalizedEmail = normalizeEmail(email);
+  validateSuperadminSignup({ role, email: normalizedEmail });
+
   const existingUser = await User.findOne({ email: normalizedEmail });
 
   if (existingUser) {
