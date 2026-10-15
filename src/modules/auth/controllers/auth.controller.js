@@ -4,9 +4,37 @@ const signup = async (req, res, next) => {
   try {
     const result = await authService.signup(req.body);
 
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const resendSignupOtp = async (req, res, next) => {
+  try {
+    const result = await authService.resendSignupOtp(req.body);
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const verifySignup = async (req, res, next) => {
+  try {
+    const result = await authService.verifySignup(req.body);
+
     res.status(201).json({
       success: true,
-      message: "User registered and logged in successfully",
+      message: "Email verified and account registered successfully",
       data: result,
     });
   } catch (error) {
@@ -142,6 +170,8 @@ const setNewPassword = async (req, res, next) => {
 
 export default {
   signup,
+  resendSignupOtp,
+  verifySignup,
   signin,
   requestSuperadminSignup,
   verifySuperadminSignup,
