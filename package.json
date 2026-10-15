@@ -5,8 +5,8 @@
   "description": "Node.js Express auth server with Mongoose and OTP password reset",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
+    "start": "node api.js && node src/server.js",
+    "dev": "node api.js && node --watch src/server.js",
     "notice-worker": "node src/workers/noticeEmail.worker.js",
     "notice-worker-once": "node src/workers/noticeEmailOnce.worker.js",
     "notice-dispatch": "node src/workers/noticeDispatch.worker.js",

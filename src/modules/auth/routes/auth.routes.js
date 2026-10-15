@@ -7,6 +7,8 @@ import { handleProfileImageUpload } from "../../../middlewares/profileUpload.mid
 const router = express.Router();
 
 router.post("/signup", authController.signup);
+router.post("/signup/resend-otp", authController.resendSignupOtp);
+router.post("/signup/verify", authController.verifySignup);
 router.post("/signin", authController.signin);
 router.post("/superadmin/signup/request", authController.requestSuperadminSignup);
 router.post("/superadmin/signup/verify", authController.verifySuperadminSignup);

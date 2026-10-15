@@ -11,6 +11,7 @@ import {
   wrapBrandedEmail,
 } from "../../email/services/emailBranding.service.js";
 import { notifyUserRegistered } from "../../notification/services/notification.service.js";
+import PendingSignup from "../models/pendingSignup.model.js";
 import PendingSuperadminSignup from "../models/pendingSuperadminSignup.model.js";
 import User from "../models/user.model.js";
 
@@ -75,14 +76,9 @@ const validateSignupPayload = ({ name, role, email, password }) => {
   if (!name || !role || !email || !password) {
     throw new AppError("Name, role, email and password are required", 400);
   }
-};
-
-const validateSuperadminSignup = ({ role }) => {
-  if (role !== "superadmin") {
-    return;
+  if (String(password).length < 6) {
+    throw new AppError("Password must be at least 6 characters", 400);
   }
-
-  throw new AppError("Use the superadmin verification signup flow", 400);
 };
 
 const validateSigninPayload = ({ email, password }) => {
@@ -214,29 +210,158 @@ const sendOtpEmail = async (email, otp, name, options = {}) => {
 export const signup = async ({ name, role, email, password }) => {
   validateSignupPayload({ name, role, email, password });
 
-  const normalizedEmail = normalizeEmail(email);
-  validateSuperadminSignup({ role });
+  if (!["investor", "investee"].includes(role)) {
+    throw new AppError("Role must be investor or investee", 400);
+  }
 
+  const normalizedEmail = normalizeEmail(email);
   const existingUser = await User.findOne({ email: normalizedEmail });
 
   if (existingUser) {
     throw new AppError("User already exists with this email", 409);
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+  const otp = generateOtp();
+  const expiresInMinutes = Number(process.env.OTP_EXPIRES_IN_MINUTES || 10);
+  const [hashedPassword, otpHash] = await Promise.all([
+    bcrypt.hash(password, 10),
+    bcrypt.hash(otp, 10),
+  ]);
 
-  const user = await User.create({
-    name,
-    role,
-    email: normalizedEmail,
-    password: hashedPassword,
+  await PendingSignup.findOneAndUpdate(
+    { email: normalizedEmail },
+    {
+      name,
+      role,
+      email: normalizedEmail,
+      password: hashedPassword,
+      otpHash,
+      otpExpiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000),
+      verificationAttempts: 0,
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+
+  await sendOtpEmail(normalizedEmail, otp, name, {
+    subject: "Verify Your Early-N Account",
+    heading: "Verify your email address",
+    intro: "Use this OTP to verify your email and complete your account registration.",
+    previewText: "Use your Early-N verification code to complete signup.",
   });
+
+  return {
+    email: normalizedEmail,
+    role,
+    message: "Verification code sent to your email",
+  };
+};
+
+export const resendSignupOtp = async ({ email }) => {
+  if (!email) {
+    throw new AppError("Email is required", 400);
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const pendingSignup = await PendingSignup.findOne({ email: normalizedEmail });
+
+  if (!pendingSignup) {
+    throw new AppError("Please submit the signup form again", 400);
+  }
+
+  const otp = generateOtp();
+  const expiresInMinutes = Number(process.env.OTP_EXPIRES_IN_MINUTES || 10);
+  const otpHash = await bcrypt.hash(otp, 10);
+
+  await PendingSignup.updateOne(
+    { _id: pendingSignup._id },
+    {
+      otpHash,
+      otpExpiresAt: new Date(Date.now() + expiresInMinutes * 60 * 1000),
+      verificationAttempts: 0,
+    }
+  );
+
+  await sendOtpEmail(normalizedEmail, otp, pendingSignup.name, {
+    subject: "Verify Your Early-N Account",
+    heading: "Verify your email address",
+    intro: "Use this OTP to verify your email and complete your account registration.",
+    previewText: "Use your Early-N verification code to complete signup.",
+  });
+
+  return {
+    email: normalizedEmail,
+    message: "A new verification code was sent to your email",
+  };
+};
+
+export const verifySignup = async ({ email, otp }) => {
+  if (!email || !otp) {
+    throw new AppError("Email and OTP are required", 400);
+  }
+
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedOtp = String(otp).trim();
+
+  if (!/^\d{4}$/.test(normalizedOtp)) {
+    throw new AppError("OTP must be a 4 digit number", 400);
+  }
+
+  const pendingSignup = await PendingSignup.findOne({ email: normalizedEmail }).select(
+    "+password +otpHash +otpExpiresAt +verificationAttempts"
+  );
+
+  if (!pendingSignup) {
+    throw new AppError("Please submit the signup form again", 400);
+  }
+
+  if (pendingSignup.otpExpiresAt.getTime() < Date.now()) {
+    await PendingSignup.deleteOne({ _id: pendingSignup._id });
+    throw new AppError("OTP has expired. Please submit the signup form again", 400);
+  }
+
+  if (pendingSignup.verificationAttempts >= 5) {
+    await PendingSignup.deleteOne({ _id: pendingSignup._id });
+    throw new AppError("Too many invalid attempts. Please submit the signup form again", 429);
+  }
+
+  const isOtpMatched = await bcrypt.compare(normalizedOtp, pendingSignup.otpHash);
+
+  if (!isOtpMatched) {
+    pendingSignup.verificationAttempts += 1;
+    await pendingSignup.save();
+    throw new AppError("Invalid OTP", 400);
+  }
+
+  const existingUser = await User.findOne({ email: normalizedEmail });
+
+  if (existingUser) {
+    await PendingSignup.deleteOne({ _id: pendingSignup._id });
+    throw new AppError("User already exists with this email", 409);
+  }
+
+  let user;
+
+  try {
+    user = await User.create({
+      name: pendingSignup.name,
+      role: pendingSignup.role,
+      email: pendingSignup.email,
+      password: pendingSignup.password,
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      await PendingSignup.deleteOne({ _id: pendingSignup._id });
+      throw new AppError("User already exists with this email", 409);
+    }
+    throw error;
+  }
 
   const accessToken = generateAccessToken(user);
   const refreshToken = generateRefreshToken(user);
 
   user.refreshToken = refreshToken;
   await user.save();
+  await PendingSignup.deleteOne({ _id: pendingSignup._id });
   await notifyUserRegistered(user);
 
   return buildAuthResponse(user, accessToken, refreshToken);
