@@ -1,8 +1,6 @@
 node_modules/
 
 # Environment files
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -30,8 +28,9 @@ build/
 # OS and editor files
 .DS_Store
 Thumbs.db
-.vscode/
 .idea/
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+config.bat
+.gitignore
