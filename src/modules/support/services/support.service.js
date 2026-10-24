@@ -8,6 +8,7 @@ import SupportConversation, {
   supportSenderTypes,
   supportStatuses,
 } from "../models/supportConversation.model.js";
+import { assertSupportIpAllowed } from "./blockedIp.service.js";
 import {
   deleteChatAttachmentFromS3,
   isChatAttachmentKeyForConversation,
@@ -20,6 +21,30 @@ const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
 const normalizeText = (value) => String(value || "").trim();
+
+const normalizeClientIp = (value) => {
+  const ip = normalizeText(value).replace(/^::ffff:/i, "");
+
+  if (!ip || ip === "::1") {
+    return ip === "::1" ? "127.0.0.1" : "";
+  }
+
+  return ip.split(",")[0].trim();
+};
+
+export const getRequestClientIp = (req) => {
+  const forwarded = req?.headers?.["x-forwarded-for"];
+  const forwardedValue = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+
+  return (
+    normalizeClientIp(forwardedValue) ||
+    normalizeClientIp(req?.headers?.["x-real-ip"]) ||
+    normalizeClientIp(req?.headers?.["cf-connecting-ip"]) ||
+    normalizeClientIp(req?.ip) ||
+    normalizeClientIp(req?.socket?.remoteAddress) ||
+    ""
+  );
+};
 
 const validateMessage = (message, fieldName = "message", options = {}) => {
   const normalizedMessage = normalizeText(message);
@@ -210,6 +235,7 @@ const serializeConversation = (conversation, options = {}) => {
     status: conversation.status,
     messages: sortedMessages,
     lastMessageAt: conversation.lastMessageAt,
+    clientIp: conversation.clientIp || "",
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
   };
@@ -243,6 +269,7 @@ const buildConversationListItem = (conversation) => {
     lastMessage: lastMessage ? buildMessageResponse(lastMessage) : null,
     messageCount: conversation.messages.length,
     lastMessageAt: conversation.lastMessageAt,
+    clientIp: conversation.clientIp || "",
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
   };
@@ -311,11 +338,13 @@ export const verifySocketIdentity = async ({ token, guestToken, conversationId }
   throw new AppError("Socket authentication is required", 401);
 };
 
-export const createSupportConversation = async (authUser, payload) => {
+export const createSupportConversation = async (authUser, payload, options = {}) => {
   const email = validateEmail(authUser?.email || payload.email);
   const subject = validateSubject(payload.subject);
   const message = validateMessage(payload.message);
   const guestName = normalizeText(payload.name);
+  const clientIp = normalizeClientIp(options.clientIp);
+  await assertSupportIpAllowed(clientIp);
 
   let linkedUser = null;
 
@@ -332,6 +361,7 @@ export const createSupportConversation = async (authUser, payload) => {
     subject,
     status: "pending",
     guestAccessToken,
+    clientIp,
     messages: [
       {
         senderType: linkedUser ? "user" : "guest",
@@ -366,10 +396,16 @@ export const getAllSupportConversations = async ({ search, status, page = 1, lim
     const keyword = normalizeText(search);
 
     if (keyword) {
+      const searchRegex = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const matchingUsers = await User.find({
+        $or: [{ name: searchRegex }, { email: searchRegex }],
+      }).select("_id");
+
       filters.$or = [
-        { guestName: { $regex: keyword, $options: "i" } },
-        { guestEmail: { $regex: keyword, $options: "i" } },
-        { subject: { $regex: keyword, $options: "i" } },
+        { guestName: searchRegex },
+        { guestEmail: searchRegex },
+        { subject: searchRegex },
+        { user: { $in: matchingUsers.map((user) => user._id) } },
       ];
     }
   }
@@ -515,8 +551,13 @@ export const deleteSupportMessageAttachment = async ({ authUser, conversationId,
   return serializeConversation(await getConversationOrThrow(conversation._id));
 };
 
-export const createSupportMessage = async ({ conversationId, actor, message, attachments = [] }) => {
+export const createSupportMessage = async ({ conversationId, actor, message, attachments = [], clientIp }) => {
   const conversation = await getConversationOrThrow(conversationId);
+
+  if (actor.senderType === "user" || actor.senderType === "guest") {
+    await assertSupportIpAllowed(normalizeClientIp(clientIp) || conversation.clientIp);
+  }
+
   const normalizedAttachments = normalizeChatAttachments(attachments);
   assertSupportAttachmentsBelongToConversation(conversationId, normalizedAttachments);
   const normalizedMessage = validateMessage(message, "message", {

@@ -3,7 +3,9 @@ import * as supportService from "../services/support.service.js";
 export const createSupportConversation = async (req, res, next) => {
   try {
     const authUser = req.user || null;
-    const result = await supportService.createSupportConversation(authUser, req.body);
+    const result = await supportService.createSupportConversation(authUser, req.body, {
+      clientIp: supportService.getRequestClientIp(req),
+    });
 
     res.status(201).json({
       success: true,
@@ -210,6 +212,7 @@ export const createSupportMessage = async (req, res, next) => {
       actor,
       message: req.body.message,
       attachments: req.body.attachments,
+      clientIp: supportService.getRequestClientIp(req),
     });
 
     req.app.get("io")?.to(result.room).emit("support:message", {

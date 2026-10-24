@@ -131,6 +131,11 @@ const supportConversationSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    clientIp: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   {
     timestamps: true,

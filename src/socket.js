@@ -3,6 +3,7 @@ import AppError from "./utils/appError.js";
 import {
   buildSocketRoomName,
   createSupportMessage,
+  getRequestClientIp,
   markSupportConversationAsSeen,
   verifySocketIdentity,
 } from "./modules/support/services/support.service.js";
@@ -268,6 +269,11 @@ export const createSocketServer = (httpServer) => {
           actor: socket.data.actor,
           attachments,
           message,
+          clientIp: getRequestClientIp({
+            headers: socket.handshake.headers,
+            ip: socket.handshake.address,
+            socket: { remoteAddress: socket.handshake.address },
+          }),
         });
 
         io.to(result.room).emit("support:message", {
